@@ -7,13 +7,21 @@
     "supabase": "supabase",
     "db:check": "node --env-file=.env.local scripts/check-database.mjs",
     "typecheck": "tsc --noEmit",
-    "db:test": "node --env-file=.env.local scripts/test-isolation.mjs"
+    "db:test": "node --env-file=.env.local scripts/test-isolation.mjs",
+    "api:dev": "node scripts/api.mjs serve",
+    "db:replay": "node scripts/replay-migrations.mjs",
+    "api:worker": "node scripts/api.mjs worker",
+    "api:test": "node scripts/api.mjs test",
+    "api:check": "node scripts/api.mjs check",
+    "api:contract": "node scripts/api.mjs contract && openapi-typescript packages/api-client/openapi.json -o packages/api-client/schema.d.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.118.0",
     "pg": "8.16.3"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.12",
+    "openapi-typescript": "7.13.0",
     "supabase": "2.122.0",
     "typescript": "5.9.3"
   }

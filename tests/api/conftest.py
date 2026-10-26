@@ -1,0 +1,192 @@
+from datetime import datetime, timedelta, timezone
+import os
+import time
+from uuid import UUID, uuid4
+
+import pytest
+from fastapi import Header
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
+
+from comandei.core import config
+
+os.environ.setdefault("DATABASE_URL", "postgresql://comandei_api:unit-test-only@localhost/comandei_test")
+from comandei.core.auth import Identity, current_identity
+from comandei.core.errors import APIError
+from comandei.core.repository import execute
+from comandei.main import app
+
+
+@pytest.fixture(scope="module")
+def live_db():
+    if not os.getenv("SUPABASE_DB_URL") or os.getenv("RUN_DB_TESTS") != "1":
+        pytest.skip("Enable RUN_DB_TESTS=1 on a development/test database for PostgreSQL integration tests")
+    admin_url = make_url(os.environ["SUPABASE_DB_URL"]).set(drivername="postgresql+psycopg")
+    admin = create_engine(admin_url, hide_parameters=True, connect_args=config.db_connect_args(admin_url))
+    tenants = {"a": uuid4(), "b": uuid4()}
+    users = {
+        role: uuid4()
+        for role in ["owner", "owner_b", "manager", "cashier", "waiter", "both", "blocked", "invitee"]
+    }
+    sessions = {role: uuid4() for role in users}
+    data = {"admin": admin, "tenants": tenants, "users": users, "sessions": sessions}
+    try:
+        with admin.begin() as c:
+            for role, user in users.items():
+                execute(
+                    c,
+                    "insert into auth.users(id,email,email_confirmed_at) values(:id,:email,now())",
+                    {"id": user, "email": f"api-test-{user}@example.invalid"},
+                )
+                execute(
+                    c,
+                    "insert into auth.sessions(id,user_id,created_at,updated_at,not_after) values(:id,:user,now(),now(),:expires)",
+                    {
+                        "id": sessions[role],
+                        "user": user,
+                        "expires": datetime.now(timezone.utc) + timedelta(hours=1),
+                    },
+                )
+            for name, tenant in tenants.items():
+                execute(
+                    c,
+                    "insert into app.tenants(id,name,slug) values(:id,:name,:slug)",
+                    {"id": tenant, "name": f"API fixture {name}", "slug": f"api-test-{tenant}"},
+                )
+                execute(
+                    c,
+                    "insert into app.tenant_entitlements(tenant_id,limits) values(:tenant,:limits)",
+                    {"tenant": tenant, "limits": {"max_users": 25, "max_tables": 100}},
+                )
+            for role, user in users.items():
+                if role == "invitee":
+                    continue
+                for tenant in (
+                    [tenants["a"], tenants["b"]]
+                    if role == "both"
+                    else [tenants["b"] if role == "owner_b" else tenants["a"]]
+                ):
+                    execute(
+                        c,
+                        "insert into app.memberships(tenant_id,user_id,role,status) values(:tenant,:user,:role,:status)",
+                        {
+                            "tenant": tenant,
+                            "user": user,
+                            "role": "owner"
+                            if role in ("owner", "owner_b")
+                            else "waiter"
+                            if role in ("both", "blocked")
+                            else role,
+                            "status": "blocked" if role == "blocked" else "active",
+                        },
+                    )
+            for name, tenant in tenants.items():
+                table, category, product, register = uuid4(), uuid4(), uuid4(), uuid4()
+                execute(
+                    c,
+                    "insert into app.dining_tables(id,tenant_id,code,name) values(:id,:tenant,'1','Table 1')",
+                    {"id": table, "tenant": tenant},
+                )
+                execute(
+                    c,
+                    "insert into app.categories(id,tenant_id,name) values(:id,:tenant,'Food')",
+                    {"id": category, "tenant": tenant},
+                )
+                execute(
+                    c,
+                    "insert into app.products(id,tenant_id,category_id,name,price_cents) values(:id,:tenant,:category,'Dish',2500)",
+                    {"id": product, "tenant": tenant, "category": category},
+                )
+                execute(
+                    c,
+                    "insert into app.cash_registers(id,tenant_id,code,name) values(:id,:tenant,'1','Cash 1')",
+                    {"id": register, "tenant": tenant},
+                )
+                data[name] = {"table": table, "category": category, "product": product, "register": register}
+        yield data
+    finally:
+        # Delete only IDs generated by this fixture, never global application data.
+        with admin.begin() as c:
+            for tenant in tenants.values():
+                execute(
+                    c,
+                    "delete from realtime.messages where topic=:topic",
+                    {"topic": f"tenant:{tenant}:operations"},
+                )
+                for table in [
+                    "background_jobs",
+                    "idempotency_records",
+                    "outbox_events",
+                    "audit_events",
+                    "cash_movements",
+                    "payment_entries",
+                    "tab_settlements",
+                    "cash_sessions",
+                    "cash_registers",
+                    "approval_requests",
+                    "adjustments",
+                    "order_item_modifiers",
+                    "order_items",
+                    "orders",
+                    "tabs",
+                    "product_modifier_groups",
+                    "modifier_options",
+                    "modifier_groups",
+                    "products",
+                    "categories",
+                    "dining_tables",
+                    "invitations",
+                    "tenant_entitlements",
+                    "memberships",
+                ]:
+                    execute(c, f"delete from app.{table} where tenant_id=:tenant", {"tenant": tenant})
+                execute(c, "delete from app.tenants where id=:id", {"id": tenant})
+            for user in users.values():
+                execute(c, "delete from app.profiles where user_id=:user", {"user": user})
+                execute(c, "delete from auth.sessions where user_id=:user", {"user": user})
+                execute(c, "delete from auth.users where id=:user", {"user": user})
+                execute(c, "delete from app.request_buckets where key like :prefix", {"prefix": f"{user}:%"})
+        admin.dispose()
+
+
+@pytest.fixture
+def api(live_db):
+    data = live_db
+    with data["admin"].begin() as c:
+        for user in data["users"].values():
+            execute(c, "delete from app.request_buckets where key like :prefix", {"prefix": f"{user}:%"})
+
+    def test_identity(authorization: str = Header()):
+        try:
+            user = UUID(authorization.removeprefix("Bearer "))
+            role = next(k for k, v in data["users"].items() if v == user)
+        except (ValueError, StopIteration):
+            raise APIError(401, "INVALID_TOKEN", "Test identity unavailable")
+        return Identity(
+            user,
+            {
+                "sub": str(user),
+                "aal": "aal2",
+                "session_id": str(data["sessions"][role]),
+                "amr": [{"method": "totp", "timestamp": int(time.time())}],
+            },
+        )
+
+    app.dependency_overrides[current_identity] = test_identity
+    client = TestClient(app)
+
+    def call(method, path, body=None, role="owner", key=None, tenant="a"):
+        full = f"/v1/tenants/{data['tenants'][tenant]}/{path}" if not path.startswith("/") else path
+        headers = {"Authorization": f"Bearer {data['users'][role]}"}
+        if method in ("POST", "PATCH"):
+            headers["Idempotency-Key"] = key or str(uuid4())
+        return client.request(method, full, json=body, headers=headers)
+
+    data["call"] = call
+    data["client"] = client
+    try:
+        yield data
+    finally:
+        app.dependency_overrides.clear()
+        client.close()

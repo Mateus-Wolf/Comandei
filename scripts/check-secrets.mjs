@@ -2,8 +2,9 @@ import { execFileSync } from 'node:child_process';
 
 // Inspect staged blobs without printing their contents or secrets.
 const files = execFileSync('git', ['diff', '--cached', '--name-only', '-z'], { encoding: 'utf8' }).split('\0').filter(Boolean);
-const secrets = [process.env.SUPABASE_DB_URL, process.env.DATABASE_URL]
+const secrets = [process.env.SUPABASE_DB_URL, process.env.DATABASE_URL, process.env.WORKER_DATABASE_URL, process.env.PLATFORM_DATABASE_URL]
   .filter(Boolean).flatMap(url => [url, decodeURIComponent(new URL(url).password)]).filter(Boolean);
+secrets.push(...[process.env.SUPABASE_BROADCAST_KEY, process.env.METRICS_TOKEN].filter(Boolean));
 for (const file of files) {
   if (/(^|\/)\.env(\.|$)/.test(file) && !file.endsWith('.env.example')) {
     throw new Error('Arquivo de ambiente indevido no staging.');

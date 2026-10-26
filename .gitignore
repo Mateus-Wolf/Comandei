@@ -12,3 +12,7 @@ __pycache__/
 .pytest_cache/
 .next/
 dist/
+.coverage
+htmlcov/
+.ruff_cache/
+*.log

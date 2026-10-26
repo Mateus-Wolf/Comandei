@@ -13,7 +13,7 @@ try {
   const { rows: [row] } = await client.query("select format('alter role comandei_api login password %L', $1::text) as command", [password]);
   await client.query(row.command);
   const url = new URL(adminUrl);
-  url.username = 'comandei_api';
+  url.username = url.username.includes('.') ? `comandei_api.${url.username.split('.')[1]}` : 'comandei_api';
   url.password = password;
   appendFileSync('.env.local', `\nDATABASE_URL=${url.href}\nSUPABASE_DB_CA=certs/supabase-ca.crt\n`);
   console.log('Credencial restrita criada e salva somente no arquivo local ignorado pelo Git.');
