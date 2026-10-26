@@ -8,7 +8,11 @@ npm run api:dev
 npm run web:dev
 ```
 
-Abra http://localhost:3000. Rotas: `/entrar`, `/cadastro`, `/auth/confirm` e `/conta`.
+Abra http://localhost:3000. Rotas: `/entrar`, `/cadastro`, `/auth/confirm` e `/home`. O endereço anterior `/conta` redireciona para `/home`.
+
+Após autenticar ou confirmar o e-mail, o usuário entra na home. A barra lateral contém apenas Início, identificação da conta e Sair, sem atalhos operacionais nesta etapa. No celular, o botão Menu abre e fecha a navegação. A home mantém a consulta de restaurantes e a proteção de sessão.
+
+A troca entre login e cadastro anima a saída e a entrada do formulário, mantendo a ilustração parada. A preferência `prefers-reduced-motion` desativa a animação e o atraso de navegação. Links mantêm o comportamento de abrir em nova aba com Ctrl/Cmd.
 
 O formulário pede nome (`app.profiles.display_name`), e-mail e senha (Supabase Auth), além da confirmação da senha. A criação do usuário salva automaticamente o nome no perfil por trigger. Metadados do cadastro nunca concedem permissões ou vínculo a restaurante; o onboarding continua assistido, conforme a documentação. A tela da conta exibe os vínculos retornados por `/v1/me/tenants`.
 
@@ -21,3 +25,5 @@ Validação: `npm run typecheck`, `npm run web:build`, `npm run db:replay`. O re
 O teste integrado `scripts/test-web-auth.mjs` foi executado com a API ligada: login real no Supabase, perfil salvo, JWT aceito pela API, lista vazia de restaurantes, logout e rejeição de senha incorreta. Não envia e-mails: cria uma identidade sintética e a remove ao concluir. Para repetir **somente em desenvolvimento/teste**, defina `RUN_DB_TESTS=1` e execute `node --env-file=.env.local scripts/test-web-auth.mjs`. A entrega de e-mail/abertura do link em uma caixa postal real não foi testada.
 
 Regressão após a migração: **96 testes da API aprovados**, incluindo os 22 testes de integração no PostgreSQL real. Compilação de produção, TypeScript e replay das 10 migrations aprovados. Auditoria npm das dependências de produção: nenhuma vulnerabilidade conhecida.
+
+Validação da home e transições: TypeScript e compilação de produção aprovados; navegação login → cadastro → login e Voltar conferidas no navegador. Login real com identidade descartável abriu a home, consultou os vínculos e permitiu sair pelo menu móvel. Acesso à home sem sessão retornou ao login. A identidade de teste foi removida ao concluir.

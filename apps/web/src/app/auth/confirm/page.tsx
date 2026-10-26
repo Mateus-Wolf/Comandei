@@ -14,7 +14,7 @@ export default function Confirm() {
       .then(({ data, error }) => {
         if (!active) return;
         if (error || !data.session) setFailed(true);
-        else router.replace("/conta");
+        else router.replace("/home");
         // Remove confirmation credentials/errors from the address bar after processing.
         window.history.replaceState(null, "", "/auth/confirm");
       })

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/browser";
@@ -32,13 +32,28 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
   const [visible, setVisible] = useState(false);
   const [error, setError] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  const [leaving, setLeaving] = useState(false);
+  const navigationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (navigationTimer.current) clearTimeout(navigationTimer.current);
+    },
+    [],
+  );
+  function navigate(event: { preventDefault: () => void }, href: string) {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    event.preventDefault();
+    if (navigationTimer.current) return;
+    setLeaving(true);
+    navigationTimer.current = setTimeout(() => router.push(href), 160);
+  }
   useEffect(() => {
     let active = true;
     try {
       void supabase()
         .auth.getSession()
         .then(({ data }) => {
-          if (active && data.session) router.replace("/conta");
+          if (active && data.session) router.replace("/home");
         });
     } catch {
       setError(
@@ -81,7 +96,7 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
         setError(friendlyError(result.error.code));
         return;
       }
-      if (result.data.session) router.replace("/conta");
+      if (result.data.session) router.replace("/home");
       else if (signup) setConfirmation(email);
     } catch {
       setError(friendlyError());
@@ -91,7 +106,10 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
   }
   return (
     <AuthLayout>
-      <div className="form-content">
+      <div
+        className={`form-content auth-form ${signup ? "auth-signup" : "auth-login"} ${leaving ? "auth-leaving" : ""}`}
+        inert={leaving}
+      >
         {confirmation ? (
           <>
             <span className="step-icon" aria-hidden="true">
@@ -108,7 +126,11 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
               Não encontrou? Confira o spam e, se já tiver uma conta, entre com
               sua senha.
             </p>
-            <Link className="button" href="/entrar">
+            <Link
+              className="button"
+              href="/entrar"
+              onNavigate={(event) => navigate(event, "/entrar")}
+            >
               Voltar para o login <span aria-hidden="true">→</span>
             </Link>
           </>
@@ -201,7 +223,12 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
             </form>
             <p className="switch">
               {signup ? "Já tem uma conta?" : "Primeira vez por aqui?"}{" "}
-              <Link href={signup ? "/entrar" : "/cadastro"}>
+              <Link
+                href={signup ? "/entrar" : "/cadastro"}
+                onNavigate={(event) =>
+                  navigate(event, signup ? "/entrar" : "/cadastro")
+                }
+              >
                 {signup ? "Entrar" : "Criar conta"}
               </Link>
             </p>
