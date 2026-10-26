@@ -37,5 +37,6 @@ jobs:
       - run: npm ci
       - run: npm run db:replay
       - run: npm run typecheck
+      - run: npm run web:build
       - run: npm run api:contract
       - run: git diff --exit-code -- packages/api-client

@@ -16,3 +16,6 @@ dist/
 htmlcov/
 .ruff_cache/
 *.log
+*.tsbuildinfo
+test-results/
+playwright-report/

@@ -12,6 +12,8 @@ npm run api:dev
 
 Abra [Swagger](http://127.0.0.1:8000/docs). Em outro terminal, execute `npm run api:worker` para Broadcast privado e exportações.
 
+Para abrir login e cadastro, execute `npm run web:dev` e acesse [Comandei](http://localhost:3000). Veja [configuração do frontend e confirmação de e-mail](docs/WEB.md).
+
 Em uma nova instalação:
 
 ```powershell
