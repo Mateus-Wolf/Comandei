@@ -92,7 +92,7 @@ def touch_products(uow):
 
 
 def mutate(uow, table, body, resource_id=None):
-    uow.allow("catalog.write", new_operation=True)
+    uow.allow("tables.write" if table == "dining_tables" else "catalog.write", new_operation=True)
     catalog_lock(uow)
     values = body.model_dump(exclude_unset=resource_id is not None)
     expected = values.pop("expected_version", None)
@@ -168,8 +168,10 @@ def settings(uow, body):
     uow.version(row, body.expected_version)
     values = body.model_dump(exclude_unset=True)
     values.pop("expected_version")
-    if any(v is None for v in values.values()):
+    if any(v is None for k, v in values.items() if k != "photo_path"):
         raise APIError(422, "NULL_NOT_ALLOWED", "Configuração não pode ser nula.")
+    if values.get("photo_path") and not values["photo_path"].startswith(str(uow.tenant["id"]) + "/"):
+        raise APIError(422, "INVALID_PHOTO", "A foto deve pertencer a este restaurante.")
     values["version"] = row["version"] + 1
     from comandei.core.repository import execute, identifier
 

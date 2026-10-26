@@ -12,7 +12,7 @@ from comandei.core.db import engine
 from comandei.core.errors import APIError, forbidden
 from comandei.core.idempotency import command
 from comandei.core.repository import execute
-from comandei.core.serialization import encode
+from comandei.core.serialization import encode, canonical
 from comandei.core.uow import UnitOfWork, get_uow
 from comandei.modules import attendance, cash, catalog, identity, reports, settlements
 
@@ -42,6 +42,33 @@ def my_tenants(user: User):
     with engine.begin() as c:
         execute(c, "select set_config('app.user_id',:user,true)", {"user": str(user.user_id)})
         return {"items": encode([dict(r) for r in execute(c, "select * from app.my_tenants()").mappings()])}
+
+
+@router.get("/restaurants", tags=["Restaurants"])
+def restaurants(user: User):
+    with engine.begin() as c:
+        execute(c, "select set_config('app.user_id',:user,true)", {"user": str(user.user_id)})
+        return {
+            "items": encode(execute(c, "select app.my_restaurants()").scalar_one()),
+            "can_create": execute(c, "select app.can_register_restaurant()").scalar_one(),
+        }
+
+
+@router.post("/restaurants", status_code=201, tags=["Restaurants"])
+def create_restaurant(body: s.RestaurantCreate, user: User, key: Key):
+    values = body.model_dump(mode="json")
+    with engine.begin() as c:
+        execute(c, "select set_config('app.user_id',:user,true)", {"user": str(user.user_id)})
+        result = execute(
+            c,
+            "select app.register_restaurant(:body,:key,:hash)",
+            {"body": values, "key": key, "hash": sha256(canonical(values).encode()).hexdigest()},
+        ).scalar_one()
+        return JSONResponse(
+            {"id": result["id"]},
+            status_code=201,
+            headers={"Idempotency-Replayed": str(result["replayed"]).lower()},
+        )
 
 
 @router.post("/invitations/accept", tags=["Identity"])
@@ -76,7 +103,7 @@ def register_catalog(resource, table, create_dto, patch_dto):
             request,
             key,
             body.model_dump(mode="json"),
-            "catalog.write",
+            "tables.write" if table == "dining_tables" else "catalog.write",
             lambda: catalog.mutate(uow, table, body),
             status=201,
             new=True,
@@ -88,7 +115,7 @@ def register_catalog(resource, table, create_dto, patch_dto):
             request,
             key,
             body.model_dump(mode="json"),
-            "catalog.write",
+            "tables.write" if table == "dining_tables" else "catalog.write",
             lambda: catalog.mutate(uow, table, body, resource_id),
             new=True,
         )

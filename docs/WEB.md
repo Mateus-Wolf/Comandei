@@ -10,11 +10,23 @@ npm run web:dev
 
 Abra http://localhost:3000. Rotas: `/entrar`, `/cadastro`, `/auth/confirm` e `/home`. O endereço anterior `/conta` redireciona para `/home`.
 
-Após autenticar ou confirmar o e-mail, o usuário entra na home. A barra lateral contém apenas Início, identificação da conta e Sair, sem atalhos operacionais nesta etapa. No celular, o botão Menu abre e fecha a navegação. A home mantém a consulta de restaurantes e a proteção de sessão.
+Após autenticar ou confirmar o e-mail, o usuário entra na home. A barra lateral contém Início, Restaurantes, Funcionários, Estoque, Caixa e Dashboard financeiro, além da identificação e Sair. No celular, o botão Menu abre e fecha a navegação. Funcionários, Estoque, Caixa e Financeiro mostram uma página de próxima etapa; o fluxo implementado nesta entrega é Restaurantes.
 
-A troca entre login e cadastro anima a saída e a entrada do formulário, mantendo a ilustração parada. A preferência `prefers-reduced-motion` desativa a animação e o atraso de navegação. Links mantêm o comportamento de abrir em nova aba com Ctrl/Cmd.
+A troca entre login e cadastro anima a saída e a entrada do formulário, mantendo a ilustração parada. O login bem-sucedido anima a saída da tela e a entrada no espaço autenticado. A preferência `prefers-reduced-motion` desativa a animação e o atraso de navegação. Links mantêm o comportamento de abrir em nova aba com Ctrl/Cmd.
 
-O formulário pede nome (`app.profiles.display_name`), e-mail e senha (Supabase Auth), além da confirmação da senha. A criação do usuário salva automaticamente o nome no perfil por trigger. Metadados do cadastro nunca concedem permissões ou vínculo a restaurante; o onboarding continua assistido, conforme a documentação. A tela da conta exibe os vínculos retornados por `/v1/me/tenants`.
+O formulário pede nome (`app.profiles.display_name`), e-mail e senha (Supabase Auth), além da confirmação da senha. A criação do usuário salva automaticamente o nome no perfil por trigger. Metadados do cadastro nunca concedem permissões ou vínculo a restaurante. A autorização de criar unidades vem de administradores aprovados no banco ou de um vínculo ativo de proprietário, com e-mail confirmado. A tela consulta `/v1/restaurants`, sem expor as tabelas privadas à Data API.
+
+## Restaurantes e mesas
+
+`/restaurantes` mostra as unidades vinculadas em cards e o botão Criar restaurante no topo direito. O formulário pede nome, foto opcional (JPG/PNG/WebP, até 5 MB), endereço, CNPJ, abertura, fechamento e atendimento (rodízio, à la carte ou ambos). O CNPJ é normalizado e tem os dígitos verificados, aceitando os formatos numérico e alfanumérico; isso não consulta a situação cadastral na Receita Federal. Horários que atravessam a meia-noite são aceitos.
+
+O card abre `/restaurantes/{id}`, com mesas em cards, número, assentos e disponibilidade. O administrador pode adicionar e editar mesas e os dados do restaurante. `owner` corresponde ao administrador da unidade; `manager`, `cashier` e `waiter` apenas consultam essa tela. A restrição é verificada na API e há proteção adicional nas alterações de mesas no banco. Não há concessão pública de papel administrativo.
+
+As fotos ficam no bucket privado `restaurant-photos`, com políticas por restaurante. A equipe vinculada pode visualizar; somente o proprietário da unidade ativa pode enviar e remover. A interface usa links assinados por uma hora. Falhas no envio da foto não apagam o cadastro: o formulário informa o que foi salvo e permite repetir.
+
+A conta administrativa indicada pelo usuário foi habilitada por UUID em `app.restaurant_administrators`; nenhum e-mail administrativo ou credencial foi fixado no código. A aprovação permite criar a primeira unidade, que atribui ao criador o papel `owner`. Os demais usuários entram por convite.
+
+Validação desta entrega: 85 testes unitários e 2 testes novos de integração no banco real aprovados; replay das 11 migrations (28 tabelas com RLS), TypeScript, compilação, conexão TLS e isolamento A/B aprovados. No navegador foram verificados login, criação com foto, abertura do card, inclusão e edição de mesas, celular e logout. Todos os recursos sintéticos foram removidos. O teste reproduzível `scripts/test-restaurant-browser.mjs` exige `RUN_DB_TESTS=1` e uma `TEST_BROWSER_PASSWORD` temporária; cria uma conta descartável e limpa unidades, fotos e identidade ao encerrar.
 
 No painel Supabase, em **Authentication → URL Configuration**, inclua `http://localhost:3000/auth/confirm` nas Redirect URLs e configure a Site URL correspondente. Ao publicar, cadastre também a URL HTTPS real de confirmação e ajuste a Site URL. Configure SMTP para entrega dos e-mails em produção. Sem configurar a URL permitida, o Supabase pode enviar o usuário para a Site URL padrão.
 

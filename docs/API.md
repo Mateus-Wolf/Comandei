@@ -1,6 +1,14 @@
 # API Comandei
 
-Implementação do MVP descrito em `Documentacao.md`. Código em `apps/api/comandei`, PostgreSQL no projeto Supabase `comandei`. Não inclui interface web, integração bancária, fiscal ou operação offline.
+Implementação do MVP descrito em `Documentacao.md`. Código em `apps/api/comandei`, PostgreSQL no projeto Supabase `comandei`. A interface web está documentada em `docs/WEB.md`. Não inclui integração bancária, fiscal ou operação offline.
+
+## Gestão de restaurantes
+
+`GET /v1/restaurants` retorna as unidades vinculadas ao usuário e `can_create`. `POST /v1/restaurants`, com `Idempotency-Key`, cria a unidade e seu vínculo `owner` de forma atômica. O corpo contém `name`, `address`, `cnpj`, `opens_at`, `closes_at` e `service_type` (`rodizio`, `alacarte`, `both`). Somente administradores aprovados ou proprietários ativos, com e-mail confirmado, podem criar; cadastro comum não concede esse direito.
+
+Os campos também podem ser alterados em `PATCH /v1/tenants/{id}/settings`, com `expected_version` e `Idempotency-Key`. `photo_path` deve apontar para o próprio restaurante no bucket privado `restaurant-photos`. O navegador envia a imagem diretamente pelo Storage, com RLS, sem usar chave de serviço.
+
+A escrita em `/tables` exige a permissão `tables.write`, exclusiva de `owner`. Gerentes e funcionários mantêm leitura. As demais permissões de catálogo não mudam. O provisionamento de plataforma com MFA continua separado; esta entrega amplia o onboarding com criação de unidades pelos administradores aprovados, conforme solicitação do usuário.
 
 ## Executar
 

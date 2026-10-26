@@ -33,6 +33,7 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
   const [error, setError] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [leaving, setLeaving] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
   const navigationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -96,8 +97,16 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
         setError(friendlyError(result.error.code));
         return;
       }
-      if (result.data.session) router.replace("/home");
-      else if (signup) setConfirmation(email);
+      if (result.data.session) {
+        setSignedIn(true);
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+          router.replace("/home");
+        else
+          navigationTimer.current = setTimeout(
+            () => router.replace("/home"),
+            240,
+          );
+      } else if (signup) setConfirmation(email);
     } catch {
       setError(friendlyError());
     } finally {
@@ -105,10 +114,10 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
     }
   }
   return (
-    <AuthLayout>
+    <AuthLayout exiting={signedIn}>
       <div
         className={`form-content auth-form ${signup ? "auth-signup" : "auth-login"} ${leaving ? "auth-leaving" : ""}`}
-        inert={leaving}
+        inert={leaving || signedIn}
       >
         {confirmation ? (
           <>
@@ -217,7 +226,13 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
                 </div>
               )}
               <button className="button" type="submit" disabled={busy}>
-                {busy ? "Aguarde…" : signup ? "Criar minha conta" : "Entrar"}
+                {signedIn
+                  ? "Entrando…"
+                  : busy
+                    ? "Aguarde…"
+                    : signup
+                      ? "Criar minha conta"
+                      : "Entrar"}
                 <span aria-hidden="true">→</span>
               </button>
             </form>

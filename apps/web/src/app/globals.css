@@ -539,11 +539,26 @@ footer {
   gap: 12px;
   padding: 14px;
   border-radius: 10px;
-  background: #dce8d1;
+  background: transparent;
   color: var(--ink);
   text-decoration: none;
   font-weight: 600;
   font-size: 14px;
+}
+.sidebar-navigation nav a[aria-current="page"] {
+  background: #dce8d1;
+}
+.sidebar-navigation nav a:hover {
+  background: #e2ebd8;
+}
+.sidebar-navigation nav a + a {
+  margin-top: 5px;
+}
+.sidebar-navigation {
+  margin-top: 40px;
+}
+.sidebar-content {
+  overflow-y: auto;
 }
 .nav-indicator {
   margin-left: auto;
@@ -836,5 +851,407 @@ footer {
   }
   .home-restaurants .empty-state {
     padding: 26px;
+  }
+}
+.auth-success {
+  animation: login-exit 240ms ease-in both;
+  pointer-events: none;
+}
+.home-shell {
+  animation: workspace-enter 360ms ease-out both;
+}
+@keyframes login-exit {
+  to {
+    opacity: 0;
+    transform: scale(0.992);
+  }
+}
+@keyframes workspace-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.page-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 25px;
+  margin: 4px 0 34px;
+}
+.page-heading h1 {
+  font-size: 34px;
+  font-weight: 500;
+  letter-spacing: -1.2px;
+  margin: 14px 0 10px;
+  overflow-wrap: anywhere;
+}
+.page-heading p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+  max-width: 600px;
+}
+.compact-button {
+  width: auto;
+  margin: 0;
+  justify-content: center;
+  gap: 9px;
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 12px 17px;
+}
+.page-heading > .compact-button {
+  margin-top: 22px;
+}
+.text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: none;
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 12px 0;
+  text-decoration: none;
+  text-underline-offset: 4px;
+}
+.text-button:hover {
+  text-decoration: underline;
+}
+.error .text-button {
+  display: block;
+}
+.restaurant-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 24px;
+}
+.restaurant-card {
+  display: block;
+  color: var(--ink);
+  background: white;
+  border: 1px solid #e0e5da;
+  border-radius: 16px;
+  text-decoration: none;
+  overflow: hidden;
+  transition:
+    transform 180ms,
+    box-shadow 180ms;
+}
+.restaurant-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 25px #193b360c;
+}
+.restaurant-photo {
+  height: 165px;
+  background: #e9eedf;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.restaurant-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.restaurant-photo-placeholder {
+  display: grid;
+  place-items: center;
+  border: 1px solid #bfcdb1;
+  border-radius: 50%;
+  width: 76px;
+  height: 76px;
+  color: #627755;
+}
+.restaurant-photo-placeholder svg {
+  width: 32px;
+  height: 32px;
+}
+.restaurant-card-body {
+  padding: 23px;
+}
+.card-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+.card-title h2 {
+  font-size: 21px;
+  margin: 0 0 17px;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+  overflow-wrap: anywhere;
+}
+.card-title > span {
+  color: var(--muted);
+}
+.restaurant-card .badge {
+  display: inline-block;
+  margin: 0;
+}
+.card-address {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  min-height: 42px;
+  margin: 17px 0;
+  overflow-wrap: anywhere;
+}
+.card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-top: 17px;
+  border-top: 1px solid #edf0e7;
+  font-size: 11px;
+  color: var(--muted);
+}
+.card-foot span:last-child {
+  color: var(--green);
+  font-weight: 600;
+}
+.form-dialog {
+  width: min(570px, calc(100% - 32px));
+  max-height: calc(100svh - 48px);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 0;
+  color: var(--ink);
+  background: var(--cream);
+  box-shadow: 0 20px 70px #193b3620;
+}
+.form-dialog::backdrop {
+  background: #122f2a65;
+  backdrop-filter: blur(3px);
+}
+.dialog-inner {
+  padding: 28px 32px;
+}
+.dialog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.dialog-heading h2 {
+  font-size: 25px;
+  font-weight: 500;
+  letter-spacing: -0.8px;
+  margin: 0;
+}
+.close-button {
+  border: 0;
+  background: #eef2e8;
+  color: var(--ink);
+  font-size: 25px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  height: 50px;
+  padding: 0 12px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  margin-top: 9px;
+}
+select:focus-visible {
+  outline: 3px solid #23635030;
+  border-color: var(--green);
+}
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.optional {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+}
+input[type="file"] {
+  height: auto;
+  padding: 12px;
+  font-size: 12px;
+}
+input[type="file"]::file-selector-button {
+  background: #edf3e6;
+  border: 0;
+  padding: 8px;
+  color: var(--ink);
+  border-radius: 5px;
+  margin-right: 10px;
+  cursor: pointer;
+}
+.photo-preview {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  margin-top: 15px;
+  border-radius: 10px;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+.back-link {
+  display: inline-block;
+  font-size: 13px;
+  text-decoration: none;
+  margin-bottom: 20px;
+}
+.back-link:hover {
+  text-decoration: underline;
+}
+.restaurant-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.restaurant-details .badge {
+  margin: 0;
+}
+.heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+  padding-top: 15px;
+}
+.read-only-note {
+  border-left: 3px solid #b7c9a5;
+  padding: 8px 14px;
+  margin-bottom: 28px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.table-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 20px;
+}
+.table-card {
+  border: 1px solid #e0e5da;
+  background: white;
+  border-radius: 15px;
+  padding: 24px;
+}
+.table-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+.table-drawing {
+  display: grid;
+  place-items: center;
+  background: #f0f4e9;
+  border-radius: 12px;
+  width: 54px;
+  height: 54px;
+}
+.table-drawing svg {
+  width: 30px;
+  height: 30px;
+}
+.table-status {
+  font-size: 10px;
+  border-radius: 15px;
+  padding: 7px 9px;
+  background: #eaf2e0;
+  color: #375a36;
+}
+.table-status.occupied {
+  background: #fae3cf;
+  color: #83502e;
+}
+.table-card h2 {
+  font-size: 23px;
+  font-weight: 500;
+  margin: 24px 0 9px;
+  letter-spacing: -0.5px;
+}
+.table-card p {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+}
+.table-card .text-button {
+  padding-bottom: 0;
+  margin-top: 15px;
+}
+.inactive-table {
+  opacity: 0.6;
+}
+.load-more {
+  display: block;
+  margin: 28px auto 0;
+}
+@media (max-width: 700px) {
+  .page-heading {
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 26px;
+  }
+  .page-heading h1 {
+    font-size: 29px;
+  }
+  .page-heading > .compact-button {
+    margin-top: 0;
+  }
+  .heading-actions {
+    justify-content: start;
+    padding-top: 0;
+  }
+  .restaurant-grid {
+    grid-template-columns: 1fr;
+  }
+  .table-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  .table-card {
+    padding: 18px;
+  }
+  .table-card-top {
+    flex-direction: column;
+    align-items: start;
+  }
+  .dialog-inner {
+    padding: 25px 20px;
+  }
+  .dialog-actions {
+    flex-wrap: wrap;
+  }
+  .sidebar-content {
+    overflow: visible;
   }
 }

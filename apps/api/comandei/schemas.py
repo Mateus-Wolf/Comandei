@@ -23,6 +23,29 @@ class Expected(DTO):
     expected_version: Version
 
 
+class RestaurantCreate(DTO):
+    name: Name
+    address: Annotated[str, Field(min_length=3, max_length=500)]
+    cnpj: Annotated[str, Field(min_length=14, max_length=24)]
+    opens_at: time
+    closes_at: time
+    service_type: Literal["rodizio", "alacarte", "both"]
+
+    @field_validator("cnpj")
+    @classmethod
+    def cnpj_digits(cls, value):
+        from comandei.domain.registration import normalize_cnpj
+
+        return normalize_cnpj(value)
+
+    @field_validator("opens_at", "closes_at")
+    @classmethod
+    def wall_time(cls, value):
+        if value.tzinfo is not None:
+            raise ValueError("Use horário local sem fuso.")
+        return value
+
+
 class TableCreate(DTO):
     code: Annotated[str, Field(min_length=1, max_length=40)]
     name: Name
@@ -122,12 +145,25 @@ class RegisterPatch(Expected):
 
 class SettingsPatch(Expected):
     name: Name | None = None
+    address: Annotated[str, Field(min_length=3, max_length=500)] | None = None
+    cnpj: Annotated[str, Field(min_length=14, max_length=24)] | None = None
+    opens_at: time | None = None
+    closes_at: time | None = None
+    service_type: Literal["rodizio", "alacarte", "both"] | None = None
+    photo_path: Annotated[str, Field(pattern=r"^[0-9a-f-]{36}/[0-9a-f-]{36}\.(jpg|png|webp)$")] | None = None
     timezone: str | None = None
     business_day_cutoff: time | None = None
     service_rate_bps: Annotated[int, Field(strict=True, ge=0, le=10000)] | None = None
     cashier_discount_limit_bps: Annotated[int, Field(strict=True, ge=0, le=10000)] | None = None
     manager_discount_limit_bps: Annotated[int, Field(strict=True, ge=0, le=10000)] | None = None
     cash_difference_tolerance_cents: Money | None = None
+
+    @field_validator("cnpj")
+    @classmethod
+    def cnpj_digits(cls, value):
+        from comandei.domain.registration import normalize_cnpj
+
+        return normalize_cnpj(value) if value is not None else None
 
     @field_validator("timezone")
     @classmethod
@@ -139,7 +175,7 @@ class SettingsPatch(Expected):
                 raise ValueError("Fuso IANA inválido.") from exc
         return value
 
-    @field_validator("business_day_cutoff")
+    @field_validator("business_day_cutoff", "opens_at", "closes_at")
     @classmethod
     def local_time(cls, value):
         if value is not None and value.tzinfo is not None:

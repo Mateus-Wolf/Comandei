@@ -36,7 +36,7 @@ python -m venv .venv
 
 ## Banco e conexões
 
-Projeto Supabase: [comandei](https://supabase.com/dashboard/project/ymrvogxanngxljxsdnlk), região `us-east-1`. O banco PostgreSQL de conexão se chama `postgres`. Selecione o schema **app** no painel para visualizar as 26 tabelas de negócio e a tabela adicional de rate limit.
+Projeto Supabase: [comandei](https://supabase.com/dashboard/project/ymrvogxanngxljxsdnlk), região `us-east-1`. O banco PostgreSQL de conexão se chama `postgres`. Selecione o schema **app** no painel para visualizar as 26 tabelas de negócio, a tabela de rate limit e o registro de administradores aprovados (28 tabelas ao todo).
 
 API, worker e plataforma têm credenciais SQL separadas e restritas. Conexões remotas verificam certificado e hostname TLS. Dados de negócio não são expostos à Data API do navegador. Auth e Realtime são acessados pelo cliente Supabase.
 

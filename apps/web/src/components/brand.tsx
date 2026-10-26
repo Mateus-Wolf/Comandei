@@ -9,9 +9,15 @@ export function Brand({ href = "/entrar" }: { href?: string }) {
     </Link>
   );
 }
-export function AuthLayout({ children }: { children: React.ReactNode }) {
+export function AuthLayout({
+  children,
+  exiting = false,
+}: {
+  children: React.ReactNode;
+  exiting?: boolean;
+}) {
   return (
-    <main className="auth-shell">
+    <main className={`auth-shell ${exiting ? "auth-success" : ""}`}>
       <section className="story">
         <Brand />
         <div className="story-copy">
