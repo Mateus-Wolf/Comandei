@@ -1,0 +1,1 @@
+-- Sem dados de produção. Fixtures de isolamento são transacionais e usam rollback.

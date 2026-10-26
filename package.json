@@ -1,0 +1,20 @@
+{
+  "name": "comandei",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "supabase": "supabase",
+    "db:check": "node --env-file=.env.local scripts/check-database.mjs",
+    "typecheck": "tsc --noEmit",
+    "db:test": "node --env-file=.env.local scripts/test-isolation.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.118.0",
+    "pg": "8.16.3"
+  },
+  "devDependencies": {
+    "supabase": "2.122.0",
+    "typescript": "5.9.3"
+  }
+}
