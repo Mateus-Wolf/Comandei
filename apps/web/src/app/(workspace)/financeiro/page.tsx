@@ -1,4 +1,4 @@
-import { ComingSoon } from "../../../components/coming-soon";
+import FinancialScreen from "../../../components/financial-screen";
 export default function Page() {
-  return <ComingSoon title="Dashboard financeiro" />;
+  return <FinancialScreen />;
 }

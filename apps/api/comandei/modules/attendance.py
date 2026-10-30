@@ -20,12 +20,77 @@ def bump(uow, tab, action, reason=None):
     return tab
 
 
+def prepare_guests(uow, guests, table=None, previous=()):
+    if table and table["capacity"] and sum(g.quantity for g in guests) > table["capacity"]:
+        raise APIError(422, "TABLE_CAPACITY", "A quantidade de pessoas excede os assentos da mesa.")
+    catalog_lock(uow, shared=True)
+    snapshots = {g["product_id"]: g for g in previous if g.get("product_id")}
+    prepared = []
+    for guest in guests:
+        entry = guest.model_dump(mode="json")
+        if not guest.complimentary and not guest.product_id:
+            raise APIError(422, "GUEST_PRODUCT_REQUIRED", "Selecione o rodízio de cada grupo pagante.")
+        snapshot = snapshots.get(str(guest.product_id))
+        if guest.product_id and not snapshot:
+            product = uow.repo.one("products", guest.product_id)
+            category = uow.repo.one("categories", product["category_id"])
+            if not product["active"] or not product["available"] or not category["active"]:
+                conflict("PRODUCT_UNAVAILABLE", "Rodízio indisponível no catálogo.")
+            snapshot = {"name_snapshot": product["name"], "unit_price_cents": product["price_cents"]}
+        entry.update(name_snapshot=snapshot["name_snapshot"] if snapshot else guest.label,
+                     unit_price_cents=snapshot["unit_price_cents"] if snapshot else 0)
+        prepared.append(entry)
+    cents(Decimal(sum(g["quantity"] * g["unit_price_cents"] for g in prepared if not g["complimentary"])))
+    return prepared
+
+
+def update_guests(uow, tab_id, body):
+    uow.allow("orders.submit", new_operation=True)
+    tab = uow.repo.one("tabs", tab_id, lock=True)
+    uow.version(tab, body.expected_version)
+    require_open(tab)
+    catalog_lock(uow, shared=True)
+    table = uow.repo.one("dining_tables", tab["table_id"]) if tab["table_id"] else None
+    guests = prepare_guests(uow, body.guests, table, tab.get("guests", []))
+    previous = tab.get("guests", [])
+    # Compare charges per product, so adding another group cannot hide a removal.
+    before = guest_charges(previous)
+    after = guest_charges(guests)
+    if any(after[key] < amount for key, amount in before.items()):
+        uow.allow("items.cancel")
+        if not body.reason or len(body.reason.strip()) < 3:
+            raise APIError(422, "GUEST_REDUCTION_REASON_REQUIRED", "Informe o motivo da redução de cobrança.")
+    tab = uow.repo.update("tabs", tab_id, {"guests": guests})
+    calculate(uow, tab)
+    tab = uow.repo.update("tabs", tab_id, {"version": tab["version"] + 1})
+    uow.event("tabs.guests_updated", "tab", tab_id, tab["version"], body.reason,
+              summary={"previous_guests": previous, "guests": guests})
+    return tab
+
+
+def guest_charges(guests):
+    charges = Counter()
+    for guest in guests:
+        if not guest["complimentary"]:
+            charges[guest.get("product_id")] += guest["quantity"] * guest["unit_price_cents"]
+    return charges
+
+
 def open_tab(uow, body):
     uow.allow("tabs.open", new_operation=True)
+    catalog_lock(uow, shared=True)
+    table = None
     if body.table_id:
         table = uow.repo.one("dining_tables", body.table_id, lock=True)
         if not table["active"]:
             conflict("TABLE_INACTIVE", "Mesa desativada.")
+        occupied = uow.repo.query(
+            "select 1 from app.tabs where tenant_id=:tenant and table_id=:table and status in ('open','closing')",
+            table=body.table_id,
+        ).first()
+        if occupied:
+            conflict("TABLE_OCCUPIED", "Esta mesa já possui uma comanda em atendimento.")
+    guests = prepare_guests(uow, body.guests, table)
     day = business_date(uow.tenant["timezone"], uow.tenant["business_day_cutoff"])
     uow.repo.query(
         "select pg_advisory_xact_lock(hashtextextended(:key,0))", key=f"tab-number:{uow.tenant['id']}:{day}"
@@ -38,6 +103,7 @@ def open_tab(uow, body):
         "tabs",
         {
             "table_id": body.table_id,
+            "guests": guests,
             "number": number,
             "opened_by": uow.identity.user_id,
             "business_date": day,
@@ -50,19 +116,21 @@ def open_tab(uow, body):
 def calculate(uow, tab):
     items = (
         uow.repo.query(
-            "select i.* from app.order_items i join app.orders o on o.tenant_id=i.tenant_id and o.id=i.order_id where i.tenant_id=:tenant and o.tab_id=:tab and i.status<>'cancelled' order by i.id",
+            "select i.quantity,i.unit_price_cents,coalesce(m.price_cents,0) as modifiers_cents "
+            "from app.order_items i join app.orders o on o.tenant_id=i.tenant_id and o.id=i.order_id "
+            "left join lateral (select sum(m.unit_price_cents::numeric*m.quantity) as price_cents "
+            "from app.order_item_modifiers m where m.tenant_id=i.tenant_id and m.item_id=i.id) m on true "
+            "where i.tenant_id=:tenant and o.tab_id=:tab and i.status<>'cancelled' order by i.id",
             tab=tab["id"],
         )
         .mappings()
         .all()
     )
-    subtotal = 0
+    subtotal = sum(g["quantity"] * g["unit_price_cents"] for g in tab.get("guests", [])
+                   if not g["complimentary"])
     for item in items:
-        modifiers = uow.repo.query(
-            "select coalesce(sum(unit_price_cents::numeric*quantity),0) from app.order_item_modifiers where tenant_id=:tenant and item_id=:item",
-            item=item["id"],
-        ).scalar_one()
-        subtotal += line_total(item["quantity"], item["unit_price_cents"], modifiers)
+        # Keep per-line rounding and range checks in the domain calculation.
+        subtotal += line_total(item["quantity"], item["unit_price_cents"], item["modifiers_cents"])
     subtotal = cents(Decimal(subtotal))
     discount = int(
         uow.repo.query(
@@ -95,22 +163,33 @@ def tab_detail(uow, tab_id):
             "select * from app.orders where tenant_id=:tenant and tab_id=:tab order by sequence", tab=tab_id
         ).mappings()
     ]
+    # Fetch each collection once, preserving row types and ordering in the DTO.
+    by_order = {order["id"]: order for order in orders}
     for order in orders:
-        order["items"] = [
-            dict(i)
-            for i in uow.repo.query(
-                "select * from app.order_items where tenant_id=:tenant and order_id=:id order by created_at,id",
-                id=order["id"],
-            ).mappings()
-        ]
-        for item in order["items"]:
-            item["modifiers"] = [
-                dict(m)
-                for m in uow.repo.query(
-                    "select * from app.order_item_modifiers where tenant_id=:tenant and item_id=:id order by id",
-                    id=item["id"],
-                ).mappings()
-            ]
+        order["items"] = []
+    by_item = {}
+    if orders:
+        for row in uow.repo.query(
+            "select i.* from app.order_items i join app.orders o "
+            "on o.tenant_id=i.tenant_id and o.id=i.order_id "
+            "where i.tenant_id=:tenant and o.tab_id=:tab order by i.created_at,i.id",
+            tab=tab_id,
+        ).mappings():
+            item = {**row, "modifiers": []}
+            # A new order can commit between the collection reads.
+            if item["order_id"] in by_order:
+                by_order[item["order_id"]]["items"].append(item)
+                by_item[item["id"]] = item
+    if by_item:
+        for row in uow.repo.query(
+            "select m.* from app.order_item_modifiers m join app.order_items i "
+            "on i.tenant_id=m.tenant_id and i.id=m.item_id join app.orders o "
+            "on o.tenant_id=i.tenant_id and o.id=i.order_id "
+            "where m.tenant_id=:tenant and o.tab_id=:tab order by m.id",
+            tab=tab_id,
+        ).mappings():
+            if row["item_id"] in by_item:
+                by_item[row["item_id"]]["modifiers"].append(dict(row))
     settlement = (
         uow.repo.query(
             "select * from app.tab_settlements where tenant_id=:tenant and tab_id=:tab and status in ('active','settled') order by revision desc limit 1",
@@ -362,7 +441,14 @@ def add_adjustment(uow, tab_id, body, requested_by=None):
     uow.allow("discount" if body.type == "discount" else "tabs.close")
     tab = uow.repo.one("tabs", tab_id, lock=True)
     uow.version(tab, body.expected_version)
-    require_open(tab)
+    closing_discount = tab["status"] == "closing" and body.type == "discount"
+    if closing_discount:
+        if uow.repo.query(
+            "select 1 from app.payment_entries where tenant_id=:tenant and tab_id=:tab limit 1", tab=tab_id
+        ).first():
+            conflict("TAB_HAS_PAYMENTS", "Aplique descontos antes do primeiro recebimento.")
+    else:
+        require_open(tab)
     amount = calculate(uow, tab)
     if body.type == "discount":
         total_discount = amount["discount_cents"] + body.amount_cents
@@ -405,10 +491,19 @@ def add_adjustment(uow, tab_id, body, requested_by=None):
         },
     )
     tab = bump(uow, tab, "tabs.adjusted", body.reason)
+    amounts = calculate(uow, tab)
+    if closing_discount:
+        from .settlements import freeze_settlement
+
+        uow.repo.query(
+            "update app.tab_settlements set status='superseded' where tenant_id=:tenant and tab_id=:tab and status='active'",
+            tab=tab_id,
+        )
+        freeze_settlement(uow, tab_id, amounts)
     return {
         "tab_id": tab_id,
         "version": tab["version"],
-        "amounts": calculate(uow, tab),
+        "amounts": amounts,
         "adjustment": adjustment,
     }
 
@@ -490,7 +585,7 @@ def cancel_tab(uow, tab_id, body):
     paid = uow.repo.query(
         "select 1 from app.payment_entries where tenant_id=:tenant and tab_id=:tab limit 1", tab=tab_id
     ).first()
-    if consumed or paid:
+    if consumed or paid or sum(guest_charges(tab.get("guests", [])).values()) > 0:
         conflict("TAB_HAS_HISTORY", "Somente comandas sem consumo e recebimentos podem ser canceladas.")
     result = uow.repo.update(
         "tabs",

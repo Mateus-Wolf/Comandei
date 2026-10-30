@@ -1,11 +1,23 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
+import { FormLoading } from "./form-loading";
 import { api, message, serviceLabels, type DiningTable } from "../lib/api";
 import { useWorkspace } from "./workspace-shell";
-import { TableForm } from "./table-form";
-import { RestaurantForm } from "./restaurant-form";
 import { Icon } from "./icons";
+const TableForm = dynamic(
+  () => import("./table-form").then((module) => module.TableForm),
+  { loading: FormLoading },
+);
+const TabForm = dynamic(
+  () => import("./tab-form").then((module) => module.TabForm),
+  { loading: FormLoading },
+);
+const RestaurantForm = dynamic(
+  () => import("./restaurant-form").then((module) => module.RestaurantForm),
+  { loading: FormLoading },
+);
 export default function RestaurantTablesScreen({ id }: { id: string }) {
   const { restaurants, loading: workspaceLoading, reload } = useWorkspace();
   const restaurant = restaurants.find((item) => item.id === id);
@@ -14,10 +26,15 @@ export default function RestaurantTablesScreen({ id }: { id: string }) {
   const [error, setError] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [attending, setAttending] = useState<DiningTable>();
   const [editing, setEditing] = useState<DiningTable>();
   const [editingRestaurant, setEditingRestaurant] = useState(false);
+  const activeRequest = useRef<AbortController | null>(null);
   const load = useCallback(
-    async (next?: string) => {
+    async (next?: string, fresh = false) => {
+      activeRequest.current?.abort();
+      const controller = new AbortController();
+      activeRequest.current = controller;
       setLoading(true);
       try {
         const result = await api<{
@@ -25,22 +42,27 @@ export default function RestaurantTablesScreen({ id }: { id: string }) {
           next_cursor: string | null;
         }>(
           `/tenants/${id}/tables?limit=100${next ? "&cursor=" + encodeURIComponent(next) : ""}`,
+          { signal: controller.signal, fresh },
         );
+        if (controller.signal.aborted) return;
         setTables((previous) =>
           next ? [...previous, ...result.items] : result.items,
         );
         setCursor(result.next_cursor);
         setError("");
       } catch (error) {
-        setError(message(error));
+        if (!controller.signal.aborted) setError(message(error));
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     },
     [id],
   );
   useEffect(() => {
+    setTables([]);
+    setCursor(null);
     void load();
+    return () => activeRequest.current?.abort();
   }, [load]);
   if (workspaceLoading) return <p role="status">Carregando restaurante…</p>;
   if (!restaurant)
@@ -76,6 +98,13 @@ export default function RestaurantTablesScreen({ id }: { id: string }) {
           </div>
         </div>
         <div className="heading-actions">
+          <button
+            className="secondary-button"
+            disabled={loading}
+            onClick={() => void load(undefined, true)}
+          >
+            {loading ? "Atualizando…" : "Atualizar mesas"}
+          </button>
           {canEdit && (
             <>
               <button
@@ -97,14 +126,17 @@ export default function RestaurantTablesScreen({ id }: { id: string }) {
       </div>
       {!canEdit && (
         <p className="read-only-note">
-          Visualização das mesas. Apenas o administrador pode editar esta
-          unidade.
+          Abra uma comanda para iniciar o atendimento. Apenas o administrador
+          pode alterar o cadastro das mesas.
         </p>
       )}
       {error && (
         <div className="error" role="alert">
           {error}
-          <button className="text-button" onClick={() => void load()}>
+          <button
+            className="text-button"
+            onClick={() => void load(undefined, true)}
+          >
             Tentar novamente
           </button>
         </div>
@@ -144,7 +176,9 @@ export default function RestaurantTablesScreen({ id }: { id: string }) {
                     {!table.active
                       ? "Inativa"
                       : table.active_tab
-                        ? "Em atendimento"
+                        ? table.active_tab.status === "closing"
+                          ? "Aguardando caixa"
+                          : "Em atendimento"
                         : "Disponível"}
                   </span>
                 </div>
@@ -154,6 +188,16 @@ export default function RestaurantTablesScreen({ id }: { id: string }) {
                     ? `${table.capacity} ${table.capacity === 1 ? "assento" : "assentos"}`
                     : "Assentos não informados"}
                 </p>
+                {table.active && (
+                  <button
+                    className="button compact-button"
+                    onClick={() => setAttending(table)}
+                  >
+                    {table.active_tab
+                      ? `Ver comanda ${table.active_tab.number}`
+                      : "Abrir comanda"}
+                  </button>
+                )}
                 {canEdit && (
                   <button
                     className="text-button"
@@ -175,6 +219,15 @@ export default function RestaurantTablesScreen({ id }: { id: string }) {
         >
           {loading ? "Carregando…" : "Carregar mais mesas"}
         </button>
+      )}
+      {attending && (
+        <TabForm
+          tenantId={id}
+          table={attending}
+          role={restaurant.role}
+          onClose={() => setAttending(undefined)}
+          onSaved={load}
+        />
       )}
       {(adding || editing) && (
         <TableForm

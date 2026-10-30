@@ -1,6 +1,6 @@
 from datetime import date
 from hashlib import sha256
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request
@@ -14,7 +14,7 @@ from comandei.core.idempotency import command
 from comandei.core.repository import execute
 from comandei.core.serialization import encode, canonical
 from comandei.core.uow import UnitOfWork, get_uow
-from comandei.modules import attendance, cash, catalog, identity, reports, settlements
+from comandei.modules import attendance, cash, cash_screen, catalog, identity, reports, settlements, stock
 
 router = APIRouter(prefix="/v1")
 Uow = Annotated[UnitOfWork, Depends(get_uow, scope="function")]
@@ -48,15 +48,19 @@ def my_tenants(user: User):
 def restaurants(user: User):
     with engine.begin() as c:
         execute(c, "select set_config('app.user_id',:user,true)", {"user": str(user.user_id)})
-        return {
-            "items": encode(execute(c, "select app.my_restaurants()").scalar_one()),
-            "can_create": execute(c, "select app.can_register_restaurant()").scalar_one(),
-        }
+        row = (
+            execute(c, "select app.my_restaurants() as items, app.can_register_restaurant() as can_create")
+            .mappings()
+            .one()
+        )
+        return encode(dict(row))
 
 
 @router.post("/restaurants", status_code=201, tags=["Restaurants"])
 def create_restaurant(body: s.RestaurantCreate, user: User, key: Key):
     values = body.model_dump(mode="json")
+    if body.address_details:
+        values["address"] = body.address_details.display()
     with engine.begin() as c:
         execute(c, "select set_config('app.user_id',:user,true)", {"user": str(user.user_id)})
         result = execute(
@@ -183,10 +187,25 @@ def get_catalog(uow: Uow, limit: Limit = 50, cursor: Cursor = None):
     return encode(catalog.catalog(uow, limit, cursor))
 
 
+@router.get("/tenants/{tenant_id}/stock", tags=["Catalog"], response_model=s.StockPage)
+def stock_overview(
+    uow: Uow,
+    limit: Limit = 30,
+    cursor: Annotated[str | None, Query(max_length=4096)] = None,
+    search: Annotated[str, Query(max_length=160)] = "",
+    category_id: UUID | None = None,
+    status: Literal["all", "available", "unavailable", "inactive"] = "all",
+):
+    return encode(stock.overview(uow, limit, cursor, search, category_id, status))
+
+
 @router.get("/tenants/{tenant_id}/settings", tags=["Administration"])
 def get_settings(uow: Uow):
     uow.allow("read")
-    return encode(uow.tenant)
+    details = uow.repo.query(
+        "select to_jsonb(a) - 'tenant_id' - 'created_at' - 'updated_at' from app.restaurant_addresses a where tenant_id=:tenant"
+    ).scalar_one_or_none()
+    return encode({**uow.tenant, "address_details": details})
 
 
 @router.patch("/tenants/{tenant_id}/settings", tags=["Administration"])
@@ -231,6 +250,12 @@ def tab_detail(tab_id: UUID, uow: Uow):
     return encode(attendance.tab_detail(uow, tab_id))
 
 
+@router.put("/tenants/{tenant_id}/tabs/{tab_id}/guests", tags=["Attendance"], response_model=s.TabRead)
+def tab_guests(tab_id: UUID, body: s.TabGuests, request: Request, uow: Uow, key: Key):
+    return write(uow, request, key, body.model_dump(mode="json"), "orders.submit",
+                 lambda: attendance.update_guests(uow, tab_id, body), new=True)
+
+
 @router.get("/tenants/{tenant_id}/tabs/{tab_id}/prebill", tags=["Payments"])
 def prebill(tab_id: UUID, uow: Uow):
     detail = attendance.tab_detail(uow, tab_id)
@@ -239,10 +264,22 @@ def prebill(tab_id: UUID, uow: Uow):
 
 @router.get("/tenants/{tenant_id}/tabs/{tab_id}/receipt", tags=["Payments"])
 def receipt(tab_id: UUID, uow: Uow):
+    from decimal import Decimal
+    from comandei.domain.finance import line_total
+
     detail = attendance.tab_detail(uow, tab_id)
     if detail["status"] != "closed":
         raise APIError(409, "TAB_NOT_CLOSED", "O recibo exige uma comanda encerrada.")
     detail["document_type"] = "NON_FISCAL_OPERATIONAL_RECEIPT"
+    detail["restaurant"] = {k: uow.tenant.get(k) for k in ("name", "cnpj", "address", "timezone")}
+    table = uow.repo.one("dining_tables", detail["table_id"]) if detail.get("table_id") else None
+    detail["table"] = {k: table[k] for k in ("code", "name")} if table else None
+    for order in detail["orders"]:
+        for item in order["items"]:
+            item["line_total_cents"] = line_total(
+                item["quantity"], item["unit_price_cents"],
+                sum((Decimal(str(m["quantity"])) * m["unit_price_cents"] for m in item["modifiers"]), Decimal(0)),
+            )
     return encode(detail)
 
 
@@ -329,7 +366,7 @@ def start_closing(tab_id: UUID, body: s.StartClosing, request: Request, uow: Uow
         request,
         key,
         body.model_dump(mode="json"),
-        "tabs.close",
+        "tabs.start_closing",
         lambda: settlements.start_closing(uow, tab_id, body),
     )
 
@@ -436,6 +473,13 @@ def open_session(body: s.CashOpen, request: Request, uow: Uow, key: Key):
     )
 
 
+@router.get("/tenants/{tenant_id}/cash-overview", tags=["Cash"])
+def cash_overview(
+    uow: Uow, session_id: UUID | None = None, tab_search: Annotated[str, Query(max_length=80)] = ""
+):
+    return encode(cash_screen.overview(uow, session_id, tab_search))
+
+
 @router.get("/tenants/{tenant_id}/cash-sessions", tags=["Cash"])
 def sessions(uow: Uow, limit: Limit = 50, cursor: Cursor = None):
     uow.allow("cash.write")
@@ -478,6 +522,16 @@ def daily_report(day: date, uow: Uow):
     return encode(reports.daily(uow, day))
 
 
+@router.get("/tenants/{tenant_id}/reports/financial", tags=["Reports"], response_model=s.FinancialOverview)
+def financial_report(
+    uow: Uow,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    period: Literal["today", "week", "month"] = "week",
+):
+    return encode(reports.financial(uow, start_date, end_date, period))
+
+
 @router.post("/tenants/{tenant_id}/exports", status_code=202, tags=["Reports"])
 def export(body: s.ExportCreate, request: Request, uow: Uow, key: Key):
     return write(
@@ -510,6 +564,11 @@ def list_members(uow: Uow):
     return encode(identity.members(uow))
 
 
+@router.get("/tenants/{tenant_id}/team", tags=["Administration"])
+def team_overview(uow: Uow):
+    return encode(identity.team(uow))
+
+
 @router.post("/tenants/{tenant_id}/invitations", status_code=201, tags=["Administration"])
 def invite(body: s.InvitationCreate, request: Request, uow: Uow, key: Key):
     uow.allow("members.invite")
@@ -525,6 +584,11 @@ def invite(body: s.InvitationCreate, request: Request, uow: Uow, key: Key):
         201,
         new=True,
     )
+
+
+@router.get("/tenants/{tenant_id}/invitations", tags=["Administration"])
+def list_invitations(uow: Uow):
+    return encode(identity.invitations(uow))
 
 
 @router.patch("/tenants/{tenant_id}/members/{user_id}", tags=["Administration"])
@@ -614,3 +678,14 @@ def platform_plan(tenant_id: UUID, body: s.PlanUpdate, user: User):
             },
         )
         return {"tenant_id": str(tenant_id), "status": body.status, "plan": body.plan}
+
+
+@router.post("/tenants/{tenant_id}/employee-logins", status_code=201, tags=["Administration"])
+def create_employee_login(body: s.EmployeeLoginCreate, request: Request, uow: Uow, key: Key):
+    import hmac
+    uow.allow("members.manage", new_operation=True)
+    values = body.model_dump(mode="json")
+    # A keyed fingerprint supports retries without persisting a guessable password hash.
+    values["password"] = hmac.new(config.SUPABASE_SECRET_KEY.encode(), body.password.encode(), "sha256").hexdigest()
+    return write(uow, request, key, values, "members.manage",
+                 lambda: identity.create_employee_login(uow, body), 201, new=True)

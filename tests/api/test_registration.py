@@ -45,3 +45,28 @@ def test_only_administrator_can_edit_tables(role):
         require(role, "tables.write")
     assert error.value.status == 403
     require("owner", "tables.write")
+
+
+ADDRESS = dict(
+    postal_code="01001000", state="SP", city="São Paulo", neighborhood="Sé", street="Praça da Sé", number="10"
+)
+
+
+def test_structured_address():
+    from comandei.schemas import RestaurantAddress
+
+    address = RestaurantAddress(**ADDRESS)
+    assert address.complement == ""
+    assert address.display() == "Praça da Sé, 10 - Sé, São Paulo/SP - 01001-000"
+    assert "Sala 1" in RestaurantAddress(**ADDRESS, complement="Sala 1").display()
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [dict(postal_code="123"), dict(state="XX"), dict(city=" "), dict(number=""), dict(complement="x" * 161)],
+)
+def test_invalid_structured_address(changes):
+    from comandei.schemas import RestaurantAddress
+
+    with pytest.raises(ValidationError):
+        RestaurantAddress(**{**ADDRESS, **changes})

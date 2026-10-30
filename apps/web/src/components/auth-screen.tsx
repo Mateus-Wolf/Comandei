@@ -3,12 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/browser";
+import { postLoginPath } from "../lib/team";
 import { AuthLayout } from "./brand";
 
 function friendlyError(code?: string) {
   const messages: Record<string, string> = {
     invalid_credentials:
-      "E-mail ou senha incorretos. Confira seus dados e tente novamente.",
+      "Usuário, e-mail ou senha incorretos. Confira seus dados e tente novamente.",
     email_not_confirmed:
       "Confirme seu e-mail antes de entrar. Verifique também a caixa de spam.",
     user_already_exists:
@@ -54,7 +55,7 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
       void supabase()
         .auth.getSession()
         .then(({ data }) => {
-          if (active && data.session) router.replace("/home");
+          if (active && data.session) router.replace(postLoginPath());
         });
     } catch {
       setError(
@@ -70,7 +71,11 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
     if (busy) return;
     setError("");
     const form = new FormData(event.currentTarget);
-    const email = String(form.get("email")).trim();
+    const login = String(form.get("email")).trim().toLowerCase();
+    const email =
+      !signup && !login.includes("@")
+        ? `${login}@staff.comandei.internal`
+        : login;
     const password = String(form.get("password"));
     const name = String(form.get("name") ?? "").trim();
     if (signup && !name) {
@@ -100,10 +105,10 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
       if (result.data.session) {
         setSignedIn(true);
         if (window.matchMedia("(prefers-reduced-motion: reduce)").matches)
-          router.replace("/home");
+          router.replace(postLoginPath());
         else
           navigationTimer.current = setTimeout(
-            () => router.replace("/home"),
+            () => router.replace(postLoginPath()),
             240,
           );
       } else if (signup) setConfirmation(email);
@@ -168,14 +173,16 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
                 </label>
               )}
               <label>
-                E-mail
+                {signup ? "E-mail" : "Usuário ou e-mail"}
                 <input
                   name="email"
-                  type="email"
-                  autoComplete="email"
+                  type={signup ? "email" : "text"}
+                  autoComplete={signup ? "email" : "username"}
                   required
                   maxLength={254}
-                  placeholder="voce@exemplo.com"
+                  placeholder={
+                    signup ? "voce@exemplo.com" : "Seu usuário ou e-mail"
+                  }
                 />
               </label>
               <label>
@@ -236,6 +243,11 @@ export default function AuthScreen({ mode }: { mode: "login" | "signup" }) {
                 <span aria-hidden="true">→</span>
               </button>
             </form>
+            {!signup && (
+              <p className="helper">
+                <Link href="/recuperar-senha">Esqueci minha senha</Link>
+              </p>
+            )}
             <p className="switch">
               {signup ? "Já tem uma conta?" : "Primeira vez por aqui?"}{" "}
               <Link

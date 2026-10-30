@@ -5,12 +5,19 @@ from .attendance import calculate, require_open, bump
 
 
 def start_closing(uow, tab_id, body):
-    uow.allow("tabs.close")
+    uow.allow("tabs.start_closing")
     tab = uow.repo.one("tabs", tab_id, lock=True)
     uow.version(tab, body.expected_version)
     require_open(tab)
     tab = uow.repo.update("tabs", tab_id, {"service_accepted": body.service_accepted})
     amounts = calculate(uow, tab)
+    settlement = freeze_settlement(uow, tab_id, amounts)
+    tab = uow.repo.update("tabs", tab_id, {"status": "closing", "version": tab["version"] + 1})
+    uow.event("tabs.closing", "tab", tab_id, tab["version"])
+    return {"tab": tab, "settlement": settlement}
+
+
+def freeze_settlement(uow, tab_id, amounts):
     revision = uow.repo.query(
         "select coalesce(max(revision),0)+1 from app.tab_settlements where tenant_id=:tenant and tab_id=:tab",
         tab=tab_id,
@@ -32,9 +39,7 @@ def start_closing(uow, tab_id, body):
             },
         },
     )
-    tab = uow.repo.update("tabs", tab_id, {"status": "closing", "version": tab["version"] + 1})
-    uow.event("tabs.closing", "tab", tab_id, tab["version"])
-    return {"tab": tab, "settlement": settlement}
+    return settlement
 
 
 def resume(uow, tab_id, body):

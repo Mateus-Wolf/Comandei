@@ -12,6 +12,7 @@ export function Dialog({
   busy?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const backdropPointer = useRef(false);
   const id = useId();
   useEffect(() => {
     const dialog = ref.current;
@@ -25,10 +26,33 @@ export function Dialog({
       aria-labelledby={id}
       onCancel={(event) => {
         event.preventDefault();
-        if (!busy) onClose();
+        // A file input's cancel event bubbles; it must not dismiss its dialog.
+        if (event.target === event.currentTarget && !busy) onClose();
+      }}
+      onPointerDown={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        backdropPointer.current =
+          event.target === event.currentTarget &&
+          (event.clientX < rect.left ||
+            event.clientX > rect.right ||
+            event.clientY < rect.top ||
+            event.clientY > rect.bottom);
       }}
       onClick={(event) => {
-        if (event.target === event.currentTarget && !busy) onClose();
+        const rect = event.currentTarget.getBoundingClientRect();
+        const outside =
+          event.clientX < rect.left ||
+          event.clientX > rect.right ||
+          event.clientY < rect.top ||
+          event.clientY > rect.bottom;
+        if (
+          backdropPointer.current &&
+          outside &&
+          event.target === event.currentTarget &&
+          !busy
+        )
+          onClose();
+        backdropPointer.current = false;
       }}
     >
       <div className="dialog-inner">

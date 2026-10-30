@@ -4,12 +4,19 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../lib/browser";
-import { api, message, RequestError, type Restaurant } from "../lib/api";
+import {
+  api,
+  clearApiCache,
+  message,
+  RequestError,
+  type Restaurant,
+} from "../lib/api";
 import { Brand } from "./brand";
 import { Icon } from "./icons";
 type Workspace = {
@@ -28,11 +35,14 @@ export function useWorkspace() {
 }
 const navigation = [
   { href: "/home", label: "Início", icon: "home" },
+  { href: "/mesas", label: "Dashboard de mesas", icon: "table" },
   { href: "/restaurantes", label: "Restaurantes", icon: "restaurants" },
   { href: "/funcionarios", label: "Funcionários", icon: "employees" },
   { href: "/estoque", label: "Estoque", icon: "stock" },
   { href: "/caixa", label: "Caixa", icon: "cash" },
   { href: "/financeiro", label: "Dashboard financeiro", icon: "chart" },
+  { href: "/aprovacoes", label: "Aprovações", icon: "employees" },
+  { href: "/configuracoes", label: "Configurações", icon: "restaurants" },
 ] as const;
 export default function WorkspaceShell({
   children,
@@ -48,15 +58,19 @@ export default function WorkspaceShell({
   const [error, setError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const reloadSequence = useRef(0);
   const reload = useCallback(async () => {
+    const sequence = ++reloadSequence.current;
     try {
       const result = await api<{ items: Restaurant[]; can_create: boolean }>(
         "/restaurants",
       );
+      if (sequence !== reloadSequence.current) return;
       setRestaurants(result.items);
       setCanCreate(result.can_create);
       setError("");
     } catch (error) {
+      if (sequence !== reloadSequence.current) return;
       setError(message(error));
       if (error instanceof RequestError && error.status === 401)
         router.replace("/entrar");
@@ -66,22 +80,26 @@ export default function WorkspaceShell({
     let active = true;
     const client = supabase();
     const { data: listener } = client.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT") router.replace("/entrar");
+      if (event === "SIGNED_OUT") {
+        clearApiCache();
+        router.replace("/entrar");
+      }
     });
     async function load() {
       try {
-        const { data, error } = await client.auth.getUser();
+        // Local session draws the shell immediately; every API request still verifies the JWT.
+        const { data, error } = await client.auth.getSession();
         if (!active) return;
-        if (error || !data.user) {
+        if (error || !data.session) {
           router.replace("/entrar");
           return;
         }
         setUser({
           name:
-            typeof data.user.user_metadata.display_name === "string"
-              ? data.user.user_metadata.display_name
+            typeof data.session.user.user_metadata.display_name === "string"
+              ? data.session.user.user_metadata.display_name
               : "Boas-vindas",
-          email: data.user.email ?? "",
+          email: data.session.user.email ?? "",
         });
         await reload();
       } catch (error) {
@@ -107,6 +125,33 @@ export default function WorkspaceShell({
       setSigningOut(false);
     }
   }
+  const management =
+    canCreate ||
+    restaurants.some(
+      (item) => item.role === "owner" || item.role === "manager",
+    );
+  const canCash =
+    management || restaurants.some((item) => item.role === "cashier");
+  const visibleNavigation = navigation.filter(
+    (item) =>
+      (item.href !== "/configuracoes" ||
+        restaurants.some((r) => r.role === "owner")) &&
+      (management ||
+        item.href === "/mesas" ||
+        item.href === "/restaurantes" ||
+        (canCash && item.href === "/caixa")),
+  );
+  const allowedPath =
+    management ||
+    (!restaurants.length && pathname === "/home") ||
+    visibleNavigation.some(
+      (item) => pathname === item.href || pathname.startsWith(item.href + "/"),
+    );
+  useEffect(() => {
+    if (!loading && !error && restaurants.length && !allowedPath) {
+      router.replace("/mesas");
+    }
+  }, [loading, error, restaurants, allowedPath, router]);
   const current = navigation.find(
     (item) => pathname === item.href || pathname.startsWith(item.href + "/"),
   );
@@ -137,7 +182,7 @@ export default function WorkspaceShell({
             <div className="sidebar-navigation">
               <span className="eyebrow">SEU ESPAÇO</span>
               <nav aria-label="Menu principal">
-                {navigation.map((item) => (
+                {visibleNavigation.map((item) => (
                   <Link
                     key={item.href}
                     href={item.href}

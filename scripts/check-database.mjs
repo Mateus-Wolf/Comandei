@@ -11,7 +11,7 @@ try {
   assert.equal(role.rolbypassrls, false);
   assert.equal(role.rolsuper, false);
   const { rows } = await client.query("select tablename, rowsecurity from pg_tables where schemaname = 'app'");
-  assert.equal(rows.length, 28);
+  assert.equal(rows.length, 29);
   assert(rows.every(row => row.rowsecurity));
   const invisible = await client.query('select * from app.dining_tables');
   assert.equal(invisible.rowCount, 0);
@@ -20,7 +20,7 @@ try {
   assert(response.ok, `Supabase Auth health: ${response.status}`);
   const { error } = await supabase.schema('app').from('dining_tables').select('*');
   assert(error, 'Business schema must not be exposed to the browser');
-  console.log('OK: conexão TLS, role restrito, 28 tabelas com RLS, bloqueio sem contexto, Auth e schema privado.');
+  console.log('OK: conexão TLS, role restrito, 29 tabelas com RLS, bloqueio sem contexto, Auth e schema privado.');
 } catch (error) {
   console.error('Falha na verificação:', error.code ?? error.name, error.message.replace(/postgres(?:ql)?:\/\/[^\s]+/g, '[URL protegida]'));
   process.exitCode = 1;

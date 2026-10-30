@@ -1,5 +1,11 @@
 # API Comandei
 
+## Desconto no fechamento e recibo
+
+`POST /v1/tenants/{tenant_id}/tabs/{tab_id}/adjustments` aceita desconto em comanda aberta ou em fechamento, com versão esperada, idempotência, motivo e limites acumulados do perfil. No fechamento, bloqueia se existir qualquer recebimento, mantém a liquidação anterior como `superseded` e grava uma nova revisão imutável com os totais recalculados. Solicitações acima do limite continuam pelo fluxo de aprovação existente, sem aplicar o desconto antecipadamente.
+
+`GET /v1/tenants/{tenant_id}/tabs/{tab_id}/receipt` exige comanda encerrada e retorna o detalhe mais `restaurant` (nome, CNPJ, endereço e fuso), `table` (código/nome, ou null no balcão) e `line_total_cents` por item, calculado no servidor com adicionais e arredondamento monetário. Conserva pessoas, horários, pagamentos, ajustes e totais; o documento é `NON_FISCAL_OPERATIONAL_RECEIPT`. A interface de caixa solicita o recibo após quitar e encerrar e abre a impressão do navegador. Não exige migration.
+
 Implementação do MVP descrito em `Documentacao.md`. Código em `apps/api/comandei`, PostgreSQL no projeto Supabase `comandei`. A interface web está documentada em `docs/WEB.md`. Não inclui integração bancária, fiscal ou operação offline.
 
 ## Gestão de restaurantes
@@ -77,7 +83,7 @@ Base `/v1`. Nas linhas abaixo, `t` é o UUID do tenant.
 | Catálogo e mesas | `GET/POST /tenants/{t}/tables`, `categories`, `products`, `modifier-groups`, `modifier-options`, `product-modifier-groups`, `cash-registers`; `GET/PATCH` nos respectivos `/{id}` |
 | Catálogo completo | `GET /tenants/{t}/catalog` com produtos paginados e seus grupos/opções |
 | Configuração | `GET/PATCH /tenants/{t}/settings`, `GET /tenants/{t}/entitlements` |
-| Comandas | `GET/POST /tenants/{t}/tabs`, `GET /tenants/{t}/tabs/{id}`, `GET .../prebill`, `GET .../receipt`, `POST .../cancel` |
+| Comandas | `GET/POST /tenants/{t}/tabs`, `GET /tenants/{t}/tabs/{id}`, `PUT .../guests`, `GET .../prebill`, `GET .../receipt`, `POST .../cancel` |
 | Pedidos e itens | `POST /tenants/{t}/tabs/{id}/orders`, `POST /tenants/{t}/items/{id}/transitions`, `POST .../cancel-requests` |
 | Aprovações | `GET /tenants/{t}/approvals`, `POST /tenants/{t}/approvals/{id}/approve` |
 | Liquidação | `POST /tenants/{t}/tabs/{id}/adjustments`, `POST .../start-closing`, `POST .../resume`, `POST .../payments`, `POST .../close` |
@@ -111,6 +117,9 @@ O contrato completo e tipos de requisição/respostas principais ficam em `packa
 - Antes de recebimentos, gerente/proprietário podem anular um desconto em comanda aberta por `POST /tenants/{t}/tabs/{tab}/adjustments/{id}/void`, com versão e motivo. O valor original e a autoria são preservados; a anulação registra ator/horário/motivo e não pode ser desfeita. O detalhe da comanda inclui todos os ajustes. Isso permite corrigir consumo após remover um desconto que se tornou incompatível com o subtotal.
 - Serviço é opcional, removível antes de recebimentos e calculado sobre subtotal menos descontos. Para ajuste de serviço, envie `type:"service"`, `accepted` e `amount_cents:0`; o servidor calcula o valor. No início de fechamento, `service_accepted` registra a confirmação final.
 - O fechamento congela uma liquidação. Novo pedido e início de fechamento disputam o mesmo lock da comanda. Reabertura só é possível antes de qualquer recebimento e torna a liquidação anterior `superseded`.
+- Garçons podem iniciar o fechamento (`tabs.start_closing`), bloqueando consumo e encaminhando a conta ao caixa. O encerramento financeiro (`tabs.close`) continua restrito a caixa, gerente e administrador e exige saldo zero. A mesa permanece ocupada nos estados `open` e `closing`, com índice único e lock na abertura impedindo comandas simultâneas.
+- Por padrão somente caixa e administrador podem reabrir comandas em fechamento. O administrador configura os demais perfis em `PATCH /settings`, campo `tab_reopen_roles`; o próprio administrador sempre mantém essa permissão. Comandas encerradas e contas com recebimentos não são reabertas por esse fluxo.
+- A abertura aceita `guests`: grupos com `label`, `quantity` inteira positiva, `product_id` e `complimentary`. Pagantes exigem produto; cortesias podem dispensá-lo. Cada grupo ocupa assentos, mas somente os pagantes entram no subtotal. A soma não pode superar a capacidade da mesa. Os lugares restantes ficam vazios, sem cobrança. Preços e nomes são obtidos no servidor e preservados na comanda. `PUT /tabs/{id}/guests` substitui os grupos apenas enquanto aberta, com `expected_version` e idempotência.
 - Recebimentos manuais somente em `closing`, com turno aberto e confirmação explícita. Parcela não pode exceder o saldo. Dinheiro entregue e troco são campos separados; receita registra só o valor recebido para a conta.
 - Pagar a última parcela não encerra a comanda automaticamente. Chame `/close` com a nova versão; saldo precisa ser exatamente zero. Conta com total zero também pode ser encerrada.
 - Estorno exige comanda encerrada, MFA recente, motivo, aprovador autenticado e referência ao recebimento original. É uma nova entrada compensatória, limitada à parcela ainda estornável. Usa um turno atualmente aberto, não modifica o turno histórico e não reabre o consumo nem gera nova cobrança automática.
@@ -162,3 +171,13 @@ As fixtures HTTP usam usuários/tenants sintéticos com UUIDs novos e removem ex
 Imagem: `docker build -f Dockerfile.api -t comandei-api .`. Execute API e worker como processos separados com variáveis injetadas; o worker usa a mesma imagem com comando `python -m comandei.worker`. Não publique `.env.local`. TLS verificado é obrigatório; a única exceção do código exige `APP_ENV=test`, flag explícita e hostname loopback.
 
 Ainda precisam de homologação antes de operação real: login/recuperação/MFA no frontend, sessão e reconexão em dispositivos, carga de referência, restauração de backup, entrega/monitoramento de alertas, build Docker e execução da CI no GitHub. Nenhum deploy público foi realizado. No Auth do projeto, o advisor apontou [proteção contra senhas vazadas desabilitada](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection); habilite a opção disponível para o plano antes de produção. Essa configuração não é alterável pelos comandos de banco utilizados aqui.
+
+## Proteção das cobranças de rodízio
+
+Atualizar os grupos de pessoas compara a cobrança por produto com a versão anterior. Remover ou reduzir uma cobrança, converter pagantes em cortesias ou substituir um rodízio exige gerente/administrador e `reason` com pelo menos três caracteres úteis. A auditoria registra os grupos anteriores, novos e o motivo. A interface inclui o campo de motivo. Abertura com cortesias continua permitida conforme o fluxo existente.
+
+Cancelamento de comanda vazia também verifica cobranças nos grupos de rodízio, além de pedidos e pagamentos. Rodízios cobrados impedem esse cancelamento.
+
+As rotas por restaurante compartilham um orçamento de 120 requisições por minuto por usuário (`UUID:global`), consumido antes de consultar o vínculo, inclusive para UUIDs de restaurantes inexistentes e operações negadas. Variar o restaurante não cria novos orçamentos. Sem alterações de schema.
+
+Validação local: 154 testes aprovados, 36 integrações opcionais ignoradas; TypeScript e geração do contrato aprovados. Sem execução no banco remoto nesta alteração.

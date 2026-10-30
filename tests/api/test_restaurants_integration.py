@@ -68,3 +68,47 @@ def test_manager_cannot_mutate_layout_or_settings(api):
         ).status_code
         == 422
     )
+
+
+def test_structured_address_edit_and_replay(api):
+    address = dict(
+        postal_code="01001000",
+        state="SP",
+        city="São Paulo",
+        neighborhood="Sé",
+        street="Praça da Sé",
+        number="10",
+        complement="",
+    )
+    # Update an existing tenant: settings, list and replay must agree.
+    initial = api["call"]("GET", "settings").json()
+    body = {"expected_version": initial["version"], "address_details": address}
+    key = str(uuid4())
+    saved = api["call"]("PATCH", "settings", body, key=key)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["address_details"] == address
+    assert "01001-000" in saved.json()["address"]
+    replay = api["call"]("PATCH", "settings", body, key=key)
+    assert replay.headers["Idempotency-Replayed"] == "true"
+    assert replay.json()["version"] == saved.json()["version"]
+    assert api["call"]("GET", "settings").json()["address_details"] == address
+    listed = next(
+        item
+        for item in api["call"]("GET", "/v1/restaurants").json()["items"]
+        if item["id"] == str(api["tenants"]["a"])
+    )
+    assert listed["address_details"] == address
+    denied = api["call"](
+        "PATCH",
+        "settings",
+        {"expected_version": saved.json()["version"], "address_details": {**address, "number": "99"}},
+        role="manager",
+    )
+    assert denied.status_code == 403
+    edited = api["call"](
+        "PATCH",
+        "settings",
+        {"expected_version": saved.json()["version"], "address_details": {**address, "complement": "Sala 2"}},
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["address_details"]["complement"] == "Sala 2"

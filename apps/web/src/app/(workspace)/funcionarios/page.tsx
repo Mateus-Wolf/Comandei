@@ -1,4 +1,4 @@
-import { ComingSoon } from "../../../components/coming-soon";
+import EmployeesScreen from "../../../components/employees-screen";
 export default function Page() {
-  return <ComingSoon title="Funcionários" />;
+  return <EmployeesScreen />;
 }

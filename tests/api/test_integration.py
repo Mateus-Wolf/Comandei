@@ -51,6 +51,69 @@ def closing_tab(api):
     )["tab"]
 
 
+@pytest.fixture
+def cashier_discount_limit(api):
+    settings = ok(api["call"]("GET", "settings"))
+    ok(api["call"]("PATCH", "settings", {"expected_version": settings["version"], "cashier_discount_limit_bps": 1000}))
+    try:
+        yield
+    finally:
+        current = ok(api["call"]("GET", "settings"))
+        ok(api["call"]("PATCH", "settings", {"expected_version": current["version"], "cashier_discount_limit_bps": settings["cashier_discount_limit_bps"]}))
+
+
+def test_cashier_discount_during_closing_and_detailed_receipt(api, cashier_discount_limit):
+    tab = open_tab(api, table_id=str(api["a"]["table"]), guests=[
+        {"label": "Aniversariante", "quantity": 1, "complimentary": True}
+    ])
+    submitted = ok(order(api, tab, role="waiter"), 201)
+    closing = ok(api["call"]("POST", f"tabs/{tab['id']}/start-closing",
+                             {"expected_version": submitted["version"]}, role="waiter"))
+    discount = {"expected_version": closing["tab"]["version"], "type": "discount",
+                "amount_cents": 100, "reason": "Desconto no fechamento"}
+    assert api["call"]("POST", f"tabs/{tab['id']}/adjustments", discount, role="waiter").status_code == 403
+    key = str(uuid4())
+    adjusted = ok(api["call"]("POST", f"tabs/{tab['id']}/adjustments", discount, role="cashier", key=key))
+    assert ok(api["call"]("POST", f"tabs/{tab['id']}/adjustments", discount, role="cashier", key=key)) == adjusted
+    assert adjusted["amounts"]["discount_cents"] == 100
+    with api["admin"].begin() as connection:
+        settlements = execute(connection,
+            "select status,total_cents from app.tab_settlements where tenant_id=:tenant and tab_id=:tab order by revision",
+            {"tenant": api["tenants"]["a"], "tab": tab["id"]}).mappings().all()
+    assert len(settlements) == 2
+    assert settlements[0]["status"] == "superseded"
+    assert settlements[0]["total_cents"] == closing["settlement"]["total_cents"]
+    assert settlements[1]["status"] == "active"
+    assert settlements[1]["total_cents"] == adjusted["amounts"]["total_cents"]
+    detail = ok(api["call"]("GET", f"tabs/{tab['id']}"))
+    assert detail["amounts"]["total_cents"] == adjusted["amounts"]["total_cents"]
+    assert api["call"]("GET", f"tabs/{tab['id']}/receipt").status_code == 409
+    session = new_cash(api, role="cashier")
+    paid = ok(api["call"]("POST", f"tabs/{tab['id']}/payments", {
+        "expected_version": adjusted["version"], "cash_session_id": session["id"],
+        "method": "pix", "amount_cents": 1000, "confirmed": True, "operation_key": str(uuid4())
+    }, role="cashier"), 201)
+    assert api["call"]("POST", f"tabs/{tab['id']}/adjustments", {
+        **discount, "expected_version": paid["version"]
+    }, role="cashier").status_code == 409
+    paid = ok(api["call"]("POST", f"tabs/{tab['id']}/payments", {
+        "expected_version": paid["version"], "cash_session_id": session["id"],
+        "method": "cash", "amount_cents": paid["balance_cents"], "confirmed": True,
+        "tendered_cents": 5000, "operation_key": str(uuid4())
+    }, role="cashier"), 201)
+    ok(api["call"]("POST", f"tabs/{tab['id']}/close", {"expected_version": paid["version"]}, role="cashier"))
+    receipt = ok(api["call"]("GET", f"tabs/{tab['id']}/receipt", role="cashier"))
+    assert receipt["document_type"] == "NON_FISCAL_OPERATIONAL_RECEIPT"
+    assert receipt["table"]["code"] == "1"
+    assert receipt["restaurant"]["name"]
+    assert receipt["opened_at"] and receipt["closed_at"]
+    assert receipt["guests"][0]["quantity"] == 1
+    assert receipt["amounts"]["discount_cents"] == 100
+    assert receipt["amounts"]["balance_cents"] == 0
+    assert [p["method"] for p in receipt["payments"]] == ["pix", "cash"]
+    assert receipt["orders"][0]["items"][0]["line_total_cents"] == 2500
+
+
 def test_tenant_isolation_and_permissions(api):
     assert api["call"]("GET", "tables", role="owner_b").status_code == 404
     assert api["call"]("GET", "tables", role="blocked").status_code == 404
@@ -820,3 +883,18 @@ def test_void_discount_before_correcting_consumption(api):
     assert final["amounts"]["total_cents"] == 0
     assert final["adjustments"][0]["amount_cents"] == 2500
     assert final["adjustments"][0]["voided_at"] is not None
+
+
+def test_pending_invitation_list_is_scoped_and_private(api):
+    email = f"pending-{uuid4()}@example.invalid"
+    created = api["call"]("POST", "invitations", {"email": email, "role": "waiter"})
+    assert created.status_code == 201, created.text
+    listing = api["call"]("GET", "invitations")
+    assert listing.status_code == 200, listing.text
+    row = next(item for item in listing.json()["items"] if item["email"] == email)
+    assert set(row) == {"id", "email", "role", "expires_at"}
+    assert created.json()["token"] not in listing.text
+    assert api["call"]("GET", "invitations", role="waiter").status_code == 403
+    other = api["call"]("GET", "invitations", role="owner_b", tenant="b")
+    assert other.status_code == 200
+    assert email not in other.text

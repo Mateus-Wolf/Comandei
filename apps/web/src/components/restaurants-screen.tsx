@@ -1,12 +1,17 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
+import { FormLoading } from "./form-loading";
 import { useRouter } from "next/navigation";
 import { useWorkspace } from "./workspace-shell";
-import { RestaurantForm } from "./restaurant-form";
 import { RestaurantPhoto } from "./restaurant-photo";
 import { Icon } from "./icons";
 import { serviceLabels } from "../lib/api";
+const RestaurantForm = dynamic(
+  () => import("./restaurant-form").then((module) => module.RestaurantForm),
+  { loading: FormLoading },
+);
 export default function RestaurantsScreen() {
   const { restaurants, canCreate, loading, reload, error } = useWorkspace();
   const [creating, setCreating] = useState(false);

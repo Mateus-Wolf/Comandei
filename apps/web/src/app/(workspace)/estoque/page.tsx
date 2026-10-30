@@ -1,4 +1,4 @@
-import { ComingSoon } from "../../../components/coming-soon";
+import StockScreen from "../../../components/stock-screen";
 export default function Page() {
-  return <ComingSoon title="Estoque" />;
+  return <StockScreen />;
 }

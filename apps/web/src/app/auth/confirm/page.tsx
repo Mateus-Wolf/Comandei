@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/browser";
+import { postLoginPath } from "../../../lib/team";
 import { AuthLayout } from "../../../components/brand";
 export default function Confirm() {
   const router = useRouter();
@@ -14,7 +15,7 @@ export default function Confirm() {
       .then(({ data, error }) => {
         if (!active) return;
         if (error || !data.session) setFailed(true);
-        else router.replace("/home");
+        else router.replace(postLoginPath());
         // Remove confirmation credentials/errors from the address bar after processing.
         window.history.replaceState(null, "", "/auth/confirm");
       })

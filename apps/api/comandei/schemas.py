@@ -23,9 +23,32 @@ class Expected(DTO):
     expected_version: Version
 
 
+class RestaurantAddress(DTO):
+    postal_code: Annotated[str, Field(pattern=r"^[0-9]{8}$")]
+    state: Annotated[
+        str,
+        Field(
+            pattern=r"^(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)$"
+        ),
+    ]
+    city: Name
+    neighborhood: Name
+    street: Annotated[str, Field(min_length=1, max_length=200, pattern=r".*\S.*")]
+    number: Annotated[str, Field(min_length=1, max_length=20, pattern=r".*\S.*")]
+    complement: Annotated[str, Field(max_length=160)] = ""
+
+    def display(self):
+        return (
+            f"{self.street}, {self.number}"
+            + (f" - {self.complement}" if self.complement else "")
+            + f" - {self.neighborhood}, {self.city}/{self.state} - {self.postal_code[:5]}-{self.postal_code[5:]}"
+        )
+
+
 class RestaurantCreate(DTO):
     name: Name
-    address: Annotated[str, Field(min_length=3, max_length=500)]
+    address: Annotated[str, Field(min_length=3, max_length=1000)]
+    address_details: RestaurantAddress | None = None
     cnpj: Annotated[str, Field(min_length=14, max_length=24)]
     opens_at: time
     closes_at: time
@@ -144,8 +167,10 @@ class RegisterPatch(Expected):
 
 
 class SettingsPatch(Expected):
+    tab_reopen_roles: Annotated[list[Role], Field(max_length=4)] | None = None
     name: Name | None = None
-    address: Annotated[str, Field(min_length=3, max_length=500)] | None = None
+    address: Annotated[str, Field(min_length=3, max_length=1000)] | None = None
+    address_details: RestaurantAddress | None = None
     cnpj: Annotated[str, Field(min_length=14, max_length=24)] | None = None
     opens_at: time | None = None
     closes_at: time | None = None
@@ -183,8 +208,21 @@ class SettingsPatch(Expected):
         return value
 
 
+class TabGuest(DTO):
+    product_id: UUID | None = None
+    quantity: Annotated[int, Field(strict=True, ge=1, le=1000)]
+    complimentary: bool = False
+    label: Name
+
+
+class TabGuests(Expected):
+    guests: Annotated[list[TabGuest], Field(max_length=100)]
+    reason: Annotated[str, Field(min_length=3, max_length=500)] | None = None
+
+
 class TabOpen(DTO):
     table_id: UUID | None = None
+    guests: Annotated[list[TabGuest], Field(max_length=100)] = []
 
 
 class OrderItem(DTO):
@@ -326,6 +364,24 @@ class ProductRead(ProductCreate, VersionedEntity):
     modifier_groups: list[dict[str, Any]] | None = None
 
 
+class StockProductRead(ProductRead):
+    category_name: str | None = None
+
+
+class StockSummary(DTO):
+    total: int
+    available: int
+    unavailable: int
+    inactive: int
+
+
+class StockPage(DTO):
+    items: list[StockProductRead]
+    next_cursor: str | None = None
+    categories: list[CategoryRead]
+    summary: StockSummary
+
+
 class ModifierGroupRead(ModifierGroupCreate, VersionedEntity):
     pass
 
@@ -351,6 +407,7 @@ class Page(BaseModel, Generic[T]):
 
 
 class TabRead(VersionedEntity):
+    guests: list[dict[str, Any]] = []
     table_id: UUID | None
     number: int
     status: Literal["open", "closing", "closed", "cancelled"]
@@ -418,3 +475,62 @@ class PaymentRecorded(DTO):
     version: Version
     balance_cents: Money
     change_cents: Money
+
+
+class FinancialDay(DTO):
+    business_date: date
+    closed_tabs: int
+    sales_cents: int
+    subtotal_cents: int
+    discount_cents: int
+    service_cents: int
+    receipts_cents: int
+    refunds_cents: int
+    net_received_cents: int
+
+
+class FinancialSales(DTO):
+    closed_tabs: int
+    sales_cents: int
+    subtotal_cents: int
+    discount_cents: int
+    service_cents: int
+
+
+class FinancialPaymentMethod(DTO):
+    method: str
+    receipts_cents: int
+    refunds_cents: int
+
+
+class FinancialCash(DTO):
+    supply_cents: int
+    withdrawal_cents: int
+    closed_sessions: int
+    open_sessions: int
+    difference_cents: int
+
+
+class FinancialOverview(DTO):
+    start_date: date
+    end_date: date
+    current_business_date: date
+    timezone: str
+    currency: Literal["BRL"]
+    sales: FinancialSales
+    receipts_cents: int
+    refunds_cents: int
+    net_received_cents: int
+    average_ticket_cents: int
+    days: list[FinancialDay]
+    payments_by_method: list[FinancialPaymentMethod]
+    cash: FinancialCash
+    document_type: Literal["NON_FISCAL_OPERATIONAL_REPORT"]
+
+
+class EmployeeLoginCreate(DTO):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+    display_name: Name
+    username: Annotated[str, Field(min_length=3, max_length=40, pattern=r"^[a-z0-9][a-z0-9._-]*$")]
+    password: Annotated[str, Field(min_length=8, max_length=128, repr=False)]
+    role: Literal["cashier", "waiter"]

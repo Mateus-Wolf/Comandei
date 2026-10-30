@@ -54,6 +54,14 @@ def page(uow, table, limit=50, cursor=None, status=None):
     }
     # Background job results are downloaded through a separate authorization check.
     cols = "id,type,status,attempts,created_at,expires_at" if table == "background_jobs" else "*"
+    if table == "dining_tables":
+        # Return occupancy in the same query, using the unique active-table index.
+        cols = (
+            "dining_tables.*, (select jsonb_build_object('id',a.id,'number',a.number,"
+            "'status',a.status,'version',a.version) from app.tabs a "
+            "where a.tenant_id=dining_tables.tenant_id and a.table_id=dining_tables.id "
+            "and a.status in ('open','closing')) as active_tab"
+        )
     rows = [
         dict(r)
         for r in uow.repo.query(
@@ -72,17 +80,6 @@ def page(uow, table, limit=50, cursor=None, status=None):
             .decode()
             .rstrip("=")
         )
-    if table == "dining_tables":
-        for row in rows:
-            active = (
-                uow.repo.query(
-                    "select id,number,status,version from app.tabs where tenant_id=:tenant and table_id=:id and status in ('open','closing')",
-                    id=row["id"],
-                )
-                .mappings()
-                .first()
-            )
-            row["active_tab"] = dict(active) if active else None
     return {"items": rows, "next_cursor": next_cursor}
 
 
@@ -148,16 +145,16 @@ def mutate(uow, table, body, resource_id=None):
 def enforce_limit(uow, key, table):
     # Serialize limit checks with other creations and membership provisioning.
     uow.repo.query("select id from app.tenants where id=:tenant for update")
-    ent = (
+    row = (
         uow.repo.query(
-            "select limits from app.tenant_entitlements where tenant_id=:tenant"
-        ).scalar_one_or_none()
-        or {}
+            f"select coalesce((select limits from app.tenant_entitlements where tenant_id=:tenant),'{{}}'::jsonb) as limits,"
+            f"(select count(*) from app.{table} where tenant_id=:tenant and active) as count"
+        )
+        .mappings()
+        .one()
     )
-    maximum = ent.get(key, 100)
-    count = uow.repo.query(
-        f"select count(*) from app.{table} where tenant_id=:tenant and active"
-    ).scalar_one()
+    maximum = row["limits"].get(key, 100)
+    count = row["count"]
     if count >= maximum:
         raise APIError(403, "PLAN_LIMIT", "Limite do plano atingido.")
 
@@ -172,10 +169,25 @@ def settings(uow, body):
         raise APIError(422, "NULL_NOT_ALLOWED", "Configuração não pode ser nula.")
     if values.get("photo_path") and not values["photo_path"].startswith(str(uow.tenant["id"]) + "/"):
         raise APIError(422, "INVALID_PHOTO", "A foto deve pertencer a este restaurante.")
+    details = values.pop("address_details", None)
+    if details is not None:
+        values["address"] = body.address_details.display()
+        uow.repo.query(
+            "insert into app.restaurant_addresses(tenant_id,postal_code,state,city,neighborhood,street,number,complement) "
+            "values(:tenant,:postal_code,:state,:city,:neighborhood,:street,:number,:complement) "
+            "on conflict(tenant_id) do update set postal_code=excluded.postal_code,state=excluded.state,"
+            "city=excluded.city,neighborhood=excluded.neighborhood,street=excluded.street,"
+            "number=excluded.number,complement=excluded.complement",
+            **details,
+        )
     values["version"] = row["version"] + 1
     from comandei.core.repository import execute, identifier
 
-    assigns = ",".join(f"{identifier(k)}=:{k}" for k in values)
+    assigns = ",".join(
+        f"{identifier(k)}=array(select jsonb_array_elements_text(:{k}))"
+        if k == "tab_reopen_roles" else f"{identifier(k)}=:{k}"
+        for k in values
+    )
     result = dict(
         execute(
             uow.connection,
@@ -185,6 +197,9 @@ def settings(uow, body):
         .mappings()
         .one()
     )
+    result["address_details"] = uow.repo.query(
+        "select to_jsonb(a) - 'tenant_id' - 'created_at' - 'updated_at' from app.restaurant_addresses a where tenant_id=:tenant"
+    ).scalar_one_or_none()
     uow.event("settings.updated", "tenant", result["id"], result["version"])
     return result
 

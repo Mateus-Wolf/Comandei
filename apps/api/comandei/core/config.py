@@ -31,3 +31,6 @@ def db_connect_args(url):
         "connect_timeout": 10,
         "prepare_threshold": None,
     }
+
+# Server only: never use a NEXT_PUBLIC variable for this credential.
+SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""))

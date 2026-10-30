@@ -36,6 +36,7 @@ jobs:
       - run: pytest tests/api/test_domain.py tests/api/test_auth.py --cov=comandei.domain --cov=comandei.core.auth --cov=comandei.core.permissions --cov-fail-under=85
       - run: npm ci
       - run: npm run db:replay
+      - run: npm run web:test
       - run: npm run typecheck
       - run: npm run web:build
       - run: npm run api:contract

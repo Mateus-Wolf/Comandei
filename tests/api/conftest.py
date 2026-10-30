@@ -179,7 +179,7 @@ def api(live_db):
     def call(method, path, body=None, role="owner", key=None, tenant="a"):
         full = f"/v1/tenants/{data['tenants'][tenant]}/{path}" if not path.startswith("/") else path
         headers = {"Authorization": f"Bearer {data['users'][role]}"}
-        if method in ("POST", "PATCH"):
+        if method in ("POST", "PATCH", "PUT"):
             headers["Idempotency-Key"] = key or str(uuid4())
         return client.request(method, full, json=body, headers=headers)
 

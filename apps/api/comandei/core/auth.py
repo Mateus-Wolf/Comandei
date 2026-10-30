@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import time
+import logging
 from uuid import UUID
 
 import httpx
@@ -74,6 +75,7 @@ def verify_token(token: str) -> Identity:
     except (httpx.HTTPError, jwt.PyJWKClientConnectionError) as exc:
         raise APIError(503, "AUTH_UNAVAILABLE", "Autenticação temporariamente indisponível.") from exc
     except (jwt.PyJWTError, ValueError, KeyError, TypeError) as exc:
+        logging.getLogger(__name__).warning("Token rejected: %s", type(exc).__name__)
         raise APIError(401, "INVALID_TOKEN", "Sessão inválida ou expirada.") from exc
 
 
@@ -109,3 +111,4 @@ def require_sensitive(identity: Identity, connection):
     ).scalar_one()
     if not active:
         raise APIError(401, "SESSION_REVOKED", "Sua sessão foi encerrada. Faça login novamente.")
+

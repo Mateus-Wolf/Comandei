@@ -19,3 +19,4 @@ htmlcov/
 *.tsbuildinfo
 test-results/
 playwright-report/
+!/.env.e2e.example
